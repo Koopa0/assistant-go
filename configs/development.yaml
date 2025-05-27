@@ -1,0 +1,91 @@
+# GoAssistant Development Configuration
+mode: development
+log_level: debug
+log_format: text
+
+database:
+  url: "postgres://goassistant:goassistant@localhost:5432/goassistant_dev?sslmode=disable"
+  max_connections: 10
+  min_connections: 2
+  max_idle_time: "10m"
+  max_lifetime: "30m"
+  connect_timeout: "5s"
+  migrations_path: "internal/storage/postgres/migrations"
+  enable_logging: true
+
+server:
+  address: ":8080"
+  read_timeout: "10s"
+  write_timeout: "10s"
+  idle_timeout: "60s"
+  shutdown_timeout: "30s"
+  enable_tls: false
+  static_dir: "internal/web/static"
+  templates_dir: "internal/web/templates"
+
+cli:
+  history_file: ".goassistant_history_dev"
+  max_history_size: 1000
+  enable_colors: true
+  prompt_template: "GoAssistant[dev]> "
+
+ai:
+  default_provider: "claude"
+  claude:
+    model: "claude-3-sonnet-20240229"
+    max_tokens: 4096
+    temperature: 0.7
+    base_url: "https://api.anthropic.com"
+  gemini:
+    model: "gemini-pro"
+    max_tokens: 4096
+    temperature: 0.7
+    base_url: "https://generativelanguage.googleapis.com"
+  embeddings:
+    provider: "claude"
+    model: "text-embedding-ada-002"
+    dimensions: 1536
+
+tools:
+  search:
+    searxng_url: "http://localhost:8888"
+    timeout: "30s"
+    max_results: 10
+    enable_cache: true
+    cache_ttl: "1h"
+  
+  postgres:
+    query_timeout: "30s"
+    max_query_size: 1048576
+    enable_explain: true
+  
+  kubernetes:
+    namespace: "default"
+    timeout: "30s"
+    enable_metrics: true
+  
+  docker:
+    host: "unix:///var/run/docker.sock"
+    api_version: "1.41"
+    timeout: "30s"
+    tls_verify: false
+  
+  cloudflare:
+    # API credentials should be set via environment variables
+  
+  langchain:
+    enable_memory: true
+    memory_size: 10
+    max_iterations: 5
+    timeout: "60s"
+
+security:
+  jwt_expiration: "24h"
+  rate_limit_rps: 100
+  rate_limit_burst: 200
+  enable_cors: true
+  allowed_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8080"
+    - "http://127.0.0.1:3000"
+    - "http://127.0.0.1:8080"

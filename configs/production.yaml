@@ -1,0 +1,93 @@
+# GoAssistant Production Configuration
+mode: production
+log_level: info
+log_format: json
+
+database:
+  # Database URL should be set via environment variable DATABASE_URL
+  max_connections: 25
+  min_connections: 5
+  max_idle_time: "15m"
+  max_lifetime: "1h"
+  connect_timeout: "10s"
+  migrations_path: "internal/storage/postgres/migrations"
+  enable_logging: false
+
+server:
+  address: ":8080"
+  read_timeout: "10s"
+  write_timeout: "10s"
+  idle_timeout: "60s"
+  shutdown_timeout: "30s"
+  enable_tls: true
+  # TLS cert and key files should be set via environment variables
+  static_dir: "internal/web/static"
+  templates_dir: "internal/web/templates"
+
+cli:
+  history_file: ".goassistant_history"
+  max_history_size: 1000
+  enable_colors: true
+  prompt_template: "GoAssistant> "
+
+ai:
+  default_provider: "claude"
+  claude:
+    # API key should be set via environment variable CLAUDE_API_KEY
+    model: "claude-3-sonnet-20240229"
+    max_tokens: 4096
+    temperature: 0.7
+    base_url: "https://api.anthropic.com"
+  gemini:
+    # API key should be set via environment variable GEMINI_API_KEY
+    model: "gemini-pro"
+    max_tokens: 4096
+    temperature: 0.7
+    base_url: "https://generativelanguage.googleapis.com"
+  embeddings:
+    provider: "claude"
+    model: "text-embedding-ada-002"
+    dimensions: 1536
+
+tools:
+  search:
+    searxng_url: "http://searxng:8080"
+    timeout: "30s"
+    max_results: 10
+    enable_cache: true
+    cache_ttl: "1h"
+  
+  postgres:
+    query_timeout: "30s"
+    max_query_size: 1048576
+    enable_explain: true
+  
+  kubernetes:
+    namespace: "default"
+    timeout: "30s"
+    enable_metrics: true
+  
+  docker:
+    host: "unix:///var/run/docker.sock"
+    api_version: "1.41"
+    timeout: "30s"
+    tls_verify: false
+  
+  cloudflare:
+    # API credentials should be set via environment variables
+  
+  langchain:
+    enable_memory: true
+    memory_size: 10
+    max_iterations: 5
+    timeout: "60s"
+
+security:
+  # JWT secret should be set via environment variable JWT_SECRET
+  jwt_expiration: "24h"
+  rate_limit_rps: 100
+  rate_limit_burst: 200
+  enable_cors: true
+  allowed_origins:
+    - "https://yourdomain.com"
+    - "https://app.yourdomain.com"

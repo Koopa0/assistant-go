@@ -1,0 +1,104 @@
+# GoAssistant Docker Compose
+# Development environment setup
+
+version: '3.8'
+
+services:
+  # PostgreSQL database with pgvector extension
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: goassistant-postgres
+    environment:
+      POSTGRES_DB: goassistant_dev
+      POSTGRES_USER: goassistant
+      POSTGRES_PASSWORD: goassistant
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U goassistant -d goassistant_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - goassistant
+
+  # SearXNG search engine
+  searxng:
+    image: searxng/searxng:latest
+    container_name: goassistant-searxng
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./configs/searxng:/etc/searxng
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8888/
+    networks:
+      - goassistant
+    depends_on:
+      - redis
+
+  # Redis for SearXNG
+  redis:
+    image: redis:7-alpine
+    container_name: goassistant-redis
+    command: redis-server --save 30 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    networks:
+      - goassistant
+
+  # GoAssistant application
+  goassistant:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: goassistant-app
+    ports:
+      - "8080:8080"
+    environment:
+      - APP_MODE=development
+      - LOG_LEVEL=debug
+      - LOG_FORMAT=json
+      - DATABASE_URL=postgres://goassistant:goassistant@postgres:5432/goassistant_dev?sslmode=disable
+      - SEARXNG_URL=http://searxng:8080
+      - SERVER_ADDRESS=:8080
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      searxng:
+        condition: service_started
+    networks:
+      - goassistant
+    restart: unless-stopped
+
+  # Development tools container (optional)
+  devtools:
+    image: golang:1.24-alpine
+    container_name: goassistant-devtools
+    working_dir: /app
+    volumes:
+      - .:/app
+      - go_mod_cache:/go/pkg/mod
+    command: tail -f /dev/null
+    networks:
+      - goassistant
+    profiles:
+      - dev
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  go_mod_cache:
+    driver: local
+
+networks:
+  goassistant:
+    driver: bridge
