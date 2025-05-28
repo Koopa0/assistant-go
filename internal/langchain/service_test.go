@@ -138,13 +138,16 @@ func TestServiceExecuteAgent(t *testing.T) {
 
 	ctx := context.Background()
 	request := &agents.AgentRequest{
-		UserID:   "test-user",
 		Query:    "test query",
 		MaxSteps: 3,
 		Context:  map[string]interface{}{"test": "context"},
 	}
 
-	response, err := service.ExecuteAgent(ctx, agents.AgentTypeDevelopment, request)
+	agentExecRequest := &AgentExecutionRequest{
+		UserID:       "test-user",
+		AgentRequest: request,
+	}
+	response, err := service.ExecuteAgent(ctx, agents.AgentTypeDevelopment, agentExecRequest)
 	if err != nil {
 		t.Fatalf("Failed to execute agent: %v", err)
 	}
@@ -153,8 +156,9 @@ func TestServiceExecuteAgent(t *testing.T) {
 		t.Error("Response should not be nil")
 	}
 
-	if !response.Success {
-		t.Error("Agent execution should be successful")
+	// AgentResponse doesn't have Success field, check if result is not empty
+	if response.Result == "" {
+		t.Error("Agent execution should return a result")
 	}
 }
 

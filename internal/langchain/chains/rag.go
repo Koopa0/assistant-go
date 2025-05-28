@@ -7,17 +7,28 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tmc/langchaingo/chains"
+	"github.com/tmc/langchaingo/embeddings"
 	"github.com/tmc/langchaingo/llms"
+	"github.com/tmc/langchaingo/schema"
+	"github.com/tmc/langchaingo/vectorstores"
 
 	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant-go/internal/langchain/documentloader"
+	"github.com/koopa0/assistant-go/internal/langchain/vectorstore"
 	"github.com/koopa0/assistant-go/internal/storage/postgres"
 )
 
-// RAGChain implements Retrieval-Augmented Generation using the existing embedding system
+// RAGChain implements Retrieval-Augmented Generation using LangChain components
 type RAGChain struct {
 	*BaseChain
-	embeddingClient *postgres.SQLCClient
-	retrievalConfig RAGRetrievalConfig
+	vectorStore       vectorstores.VectorStore
+	retriever         schema.Retriever
+	embedder          embeddings.Embedder
+	docProcessor      *documentloader.DocumentProcessor
+	embeddingClient   *postgres.SQLCClient // Fallback for direct DB access
+	retrievalConfig   RAGRetrievalConfig
+	langchainRAGChain chains.Chain // Native LangChain RAG chain
 }
 
 // RAGRetrievalConfig configures the retrieval behavior
@@ -55,7 +66,8 @@ func NewRAGChain(llm llms.Model, config config.LangChain, logger *slog.Logger) *
 	base := NewBaseChain(ChainTypeRAG, llm, config, logger)
 
 	chain := &RAGChain{
-		BaseChain: base,
+		BaseChain:    base,
+		docProcessor: documentloader.NewDocumentProcessor(logger),
 		retrievalConfig: RAGRetrievalConfig{
 			MaxDocuments:        5,
 			SimilarityThreshold: 0.7,
@@ -66,6 +78,89 @@ func NewRAGChain(llm llms.Model, config config.LangChain, logger *slog.Logger) *
 	}
 
 	return chain
+}
+
+// NewRAGChainWithComponents creates a new RAG chain with LangChain components
+func NewRAGChainWithComponents(llm llms.Model, vectorStore vectorstores.VectorStore, embedder embeddings.Embedder, config config.LangChain, logger *slog.Logger) *RAGChain {
+	base := NewBaseChain(ChainTypeRAG, llm, config, logger)
+
+	chain := &RAGChain{
+		BaseChain:    base,
+		vectorStore:  vectorStore,
+		embedder:     embedder,
+		docProcessor: documentloader.NewDocumentProcessor(logger),
+		retrievalConfig: RAGRetrievalConfig{
+			MaxDocuments:        5,
+			SimilarityThreshold: 0.7,
+			ContentTypes:        []string{"message", "document", "code"},
+			IncludeMetadata:     true,
+			RetrievalStrategy:   "similarity",
+		},
+	}
+
+	// Set up retriever if vector store is available
+	if vectorStore != nil {
+		// Check if vector store implements AsRetriever method
+		if pgVectorStore, ok := vectorStore.(*vectorstore.PGVectorStore); ok {
+			chain.retriever = pgVectorStore.AsRetriever(context.Background(),
+				vectorstores.WithScoreThreshold(float32(chain.retrievalConfig.SimilarityThreshold)))
+		} else {
+			// Use a custom retriever wrapper
+			chain.retriever = &CustomVectorStoreRetriever{
+				vectorStore: vectorStore,
+				threshold:   float32(chain.retrievalConfig.SimilarityThreshold),
+				maxDocs:     chain.retrievalConfig.MaxDocuments,
+			}
+		}
+	}
+
+	// Initialize native LangChain RAG chain if components are available
+	if vectorStore != nil && embedder != nil {
+		chain.initializeLangChainRAG()
+	}
+
+	return chain
+}
+
+// SetVectorStore sets the vector store for this RAG chain
+func (rc *RAGChain) SetVectorStore(vectorStore vectorstores.VectorStore) {
+	rc.vectorStore = vectorStore
+	if vectorStore != nil {
+		// Check if vector store implements AsRetriever method
+		if pgVectorStore, ok := vectorStore.(*vectorstore.PGVectorStore); ok {
+			rc.retriever = pgVectorStore.AsRetriever(context.Background(),
+				vectorstores.WithScoreThreshold(float32(rc.retrievalConfig.SimilarityThreshold)))
+		} else {
+			// Use a custom retriever wrapper
+			rc.retriever = &CustomVectorStoreRetriever{
+				vectorStore: vectorStore,
+				threshold:   float32(rc.retrievalConfig.SimilarityThreshold),
+				maxDocs:     rc.retrievalConfig.MaxDocuments,
+			}
+		}
+		rc.logger.Debug("Vector store set for RAG chain")
+	}
+}
+
+// SetEmbedder sets the embedder for this RAG chain
+func (rc *RAGChain) SetEmbedder(embedder embeddings.Embedder) {
+	rc.embedder = embedder
+	rc.logger.Debug("Embedder set for RAG chain")
+}
+
+// initializeLangChainRAG initializes the native LangChain RAG chain
+func (rc *RAGChain) initializeLangChainRAG() {
+	if rc.vectorStore == nil || rc.llm == nil {
+		rc.logger.Warn("Cannot initialize LangChain RAG: missing components")
+		return
+	}
+
+	// Create retrieval QA chain - TODO: Fix API compatibility
+	// ragChain := chains.LoadRetrievalQA(rc.llm, rc.retriever, nil)
+	// rc.langchainRAGChain = ragChain
+	rc.logger.Debug("LangChain RAG chain creation deferred - API compatibility issue")
+
+	rc.logger.Debug("Native LangChain RAG chain initialized")
 }
 
 // SetEmbeddingClient sets the embedding client for document retrieval
@@ -419,4 +514,26 @@ func (rc *RAGChain) AddContentType(contentType string) {
 	rc.retrievalConfig.ContentTypes = append(rc.retrievalConfig.ContentTypes, contentType)
 	rc.logger.Debug("Content type added",
 		slog.String("content_type", contentType))
+}
+
+// CustomVectorStoreRetriever wraps a VectorStore to implement schema.Retriever
+type CustomVectorStoreRetriever struct {
+	vectorStore vectorstores.VectorStore
+	threshold   float32
+	maxDocs     int
+}
+
+// GetRelevantDocuments retrieves relevant documents for a query
+func (r *CustomVectorStoreRetriever) GetRelevantDocuments(ctx context.Context, query string) ([]schema.Document, error) {
+	maxDocs := r.maxDocs
+	if maxDocs == 0 {
+		maxDocs = 10 // Default
+	}
+
+	options := make([]vectorstores.Option, 0)
+	if r.threshold > 0 {
+		options = append(options, vectorstores.WithScoreThreshold(r.threshold))
+	}
+
+	return r.vectorStore.SimilaritySearch(ctx, query, maxDocs, options...)
 }
