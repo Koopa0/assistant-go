@@ -1,0 +1,151 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  GO_VERSION: "1.24"
+  NODE_VERSION: "20"
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v3
+        with:
+          path: ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Install templ
+        run: go install github.com/a-h/templ/cmd/templ@latest
+
+      - name: Generate templ files
+        run: templ generate
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Tailwind CSS
+        run: npm install -g tailwindcss
+
+      - name: Build web assets
+        run: |
+          mkdir -p internal/web/static/css
+          tailwindcss -i internal/web/static/css/material-design.css -o internal/web/static/css/tailwind.css --minify
+
+      - name: Run tests
+        env:
+          CLAUDE_API_KEY: test-key
+          GEMINI_API_KEY: test-key
+        run: go test -v ./...
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+          
+          # Build for multiple platforms
+          PLATFORMS="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64"
+          
+          for platform in $PLATFORMS; do
+            GOOS=${platform%/*}
+            GOARCH=${platform#*/}
+            EXT=""
+            
+            if [ "$GOOS" = "windows" ]; then
+              EXT=".exe"
+            fi
+            
+            echo "Building for $GOOS/$GOARCH..."
+            CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build \
+              -ldflags="-w -s -X main.version=${GITHUB_REF#refs/tags/} -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              -o "dist/assistant-$GOOS-$GOARCH$EXT" \
+              ./cmd/assistant
+          done
+
+      - name: Create checksums
+        run: |
+          cd dist
+          sha256sum * > checksums.txt
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          if [ -f CHANGELOG.md ]; then
+            # Extract changelog for this version
+            VERSION=${GITHUB_REF#refs/tags/}
+            awk "/^## \[$VERSION\]/{flag=1; next} /^## \[/{flag=0} flag" CHANGELOG.md > release_notes.md
+          else
+            echo "Release $VERSION" > release_notes.md
+            echo "" >> release_notes.md
+            echo "See commit history for changes." >> release_notes.md
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: release_notes.md
+          files: |
+            dist/*
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${GITHUB_REF#refs/tags/}
+            BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
