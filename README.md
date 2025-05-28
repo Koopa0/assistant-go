@@ -107,12 +107,18 @@ The project demonstrates advanced Go development practices, including pure stand
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/goassistant.git
-cd goassistant
+git clone https://github.com/koopa0/assistant-go.git
+cd assistant-go
+
+# Check project status and dependencies
+./scripts/check-status.sh
+
+# Verify all dependencies are working
+go run scripts/verify-dependencies.go
 
 # Install pgvector extension for PostgreSQL
 # For Ubuntu/Debian:
-sudo apt install postgresql-15-pgvector
+sudo apt install postgresql-17-pgvector
 # For macOS:
 brew install pgvector
 
@@ -230,6 +236,7 @@ This project strictly adheres to Go's idiomatic patterns and best practices:
 
 - [Architecture Overview](docs/ARCHITECTURE.md)
 - [Development Guide](docs/DEVELOPMENT.md)
+- [Dependency Management](docs/DEPENDENCY_MANAGEMENT.md)
 - [API Reference](docs/API.md)
 - [Configuration Guide](docs/CONFIGURATION.md)
 - [Deployment Guide](docs/DEPLOYMENT.md)
@@ -311,6 +318,11 @@ See our [project board](https://github.com/yourusername/goassistant/projects) fo
 - `golangci-lint` - Code quality checks
 - `go-migrate` - Database migrations
 - `air` - Live reload for development
+
+### Project Management Scripts
+- `./scripts/check-status.sh` - Comprehensive project health check
+- `./scripts/upgrade-dependencies.sh` - Safe dependency upgrade tool
+- `go run scripts/verify-dependencies.go` - Dependency verification test
 
 ## Support
 

@@ -19,6 +19,7 @@ type Server struct {
 	logger    *slog.Logger
 	server    *http.Server
 	mux       *http.ServeMux
+	webServer *WebServer
 }
 
 // New creates a new HTTP server
@@ -32,6 +33,10 @@ func New(cfg config.ServerConfig, assistant *assistant.Assistant, logger *slog.L
 
 	// Create server mux
 	mux := http.NewServeMux()
+
+	// Initialize web server for Material Design 3 interface
+	webServer := NewWebServer(assistant, logger)
+	webServer.SetupRoutes()
 
 	// Create HTTP server
 	httpServer := &http.Server{
@@ -48,6 +53,7 @@ func New(cfg config.ServerConfig, assistant *assistant.Assistant, logger *slog.L
 		logger:    observability.ServerLogger(logger, "http"),
 		server:    httpServer,
 		mux:       mux,
+		webServer: webServer,
 	}
 
 	// Setup routes
@@ -96,7 +102,7 @@ func (s *Server) setupRoutes() {
 	handler := s.withMiddleware(s.mux)
 	s.server.Handler = handler
 
-	// API routes
+	// Legacy API routes (keep for backward compatibility)
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/status", s.handleStatus)
 	s.mux.HandleFunc("POST /api/query", s.handleQuery)
@@ -106,18 +112,10 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/tools", s.handleListTools)
 	s.mux.HandleFunc("GET /api/tools/{name}", s.handleGetTool)
 
-	// Web UI routes (placeholder for future implementation)
-	s.mux.HandleFunc("GET /", s.handleIndex)
-	s.mux.HandleFunc("GET /chat", s.handleChat)
-	s.mux.HandleFunc("GET /tools", s.handleToolsPage)
+	// Mount the new Material Design 3 web interface
+	s.mux.Handle("/", s.webServer)
 
-	// Static files
-	if s.config.StaticDir != "" {
-		fileServer := http.FileServer(http.Dir(s.config.StaticDir))
-		s.mux.Handle("GET /static/", http.StripPrefix("/static/", fileServer))
-	}
-
-	s.logger.Debug("HTTP routes configured")
+	s.logger.Debug("HTTP routes configured with Material Design 3 web interface")
 }
 
 // withMiddleware applies middleware to the handler

@@ -1,0 +1,247 @@
+package templates
+
+import (
+    "fmt"
+)
+
+type DatabasePageData struct {
+    AppLayoutData
+    Connections     []DatabaseConnectionItem
+    ActiveConnection *DatabaseConnectionItem
+    Schema          DatabaseSchemaData
+    QueryHistory    []QueryHistoryItem
+}
+
+type DatabaseConnectionItem struct {
+    ID          string
+    Name        string
+    Type        string // "postgres", "mysql", "sqlite"
+    Host        string
+    Port        int
+    Database    string
+    IsConnected bool
+    Status      string // "connected", "disconnected", "error"
+}
+
+type DatabaseSchemaData struct {
+    Tables []TableItem
+}
+
+type TableItem struct {
+    Name        string
+    Schema      string
+    RowCount    int64
+    Size        string
+    Columns     []ColumnItem
+}
+
+type ColumnItem struct {
+    Name         string
+    Type         string
+    IsNullable   bool
+    IsPrimaryKey bool
+    IsForeignKey bool
+    DefaultValue string
+}
+
+type QueryHistoryItem struct {
+    ID          string
+    Query       string
+    Timestamp   string
+    Duration    string
+    RowsAffected int64
+    Status      string // "success", "error"
+    Error       string
+}
+
+templ DatabaseManagerPage(data DatabasePageData) {
+    @AppLayout(data.AppLayoutData, databaseContent(data))
+}
+
+templ databaseContent(data DatabasePageData) {
+    <div class="database-manager">
+        <!-- Header Section -->
+        <div class="page-header">
+            <div class="header-content">
+                <h1 class="page-title">Database Manager</h1>
+                <p class="page-subtitle">SQL query editor and schema explorer</p>
+            </div>
+            <div class="header-actions">
+                <button class="btn-text" onclick="showAddConnectionModal()">
+                    <span class="material-icons-round">add_circle</span>
+                    New Connection
+                </button>
+                <button class="btn-primary" onclick="refreshSchema()">
+                    <span class="material-icons-round">refresh</span>
+                    Refresh Schema
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Content Grid -->
+        <div class="database-grid">
+            <!-- Left Panel: Connections & Schema -->
+            <div class="schema-panel">
+                <!-- Connections Dropdown -->
+                <div class="connections-section">
+                    <select class="connection-select" onchange="switchConnection(this.value)">
+                        <option value="">Select a connection...</option>
+                        for _, conn := range data.Connections {
+                            <option value={ conn.ID } selected?={ data.ActiveConnection != nil && data.ActiveConnection.ID == conn.ID }>
+                                { conn.Name } ({ conn.Type })
+                            </option>
+                        }
+                    </select>
+                    if data.ActiveConnection != nil {
+                        <div class={ "connection-status", data.ActiveConnection.Status }>
+                            <span class="status-dot"></span>
+                            { data.ActiveConnection.Status }
+                        </div>
+                    }
+                </div>
+
+                <!-- Schema Explorer -->
+                if data.ActiveConnection != nil && data.ActiveConnection.IsConnected {
+                    <div class="schema-explorer">
+                        <div class="schema-header">
+                            <h3>Schema Explorer</h3>
+                            <button class="btn-icon" onclick="collapseAllTables()">
+                                <span class="material-icons-round">unfold_less</span>
+                            </button>
+                        </div>
+                        <div class="tables-list">
+                            for _, table := range data.Schema.Tables {
+                                <div class="table-item" data-table-name={ table.Name }>
+                                    <div class="table-header" onclick="toggleTable(this)">
+                                        <div class="table-info">
+                                            <span class="material-icons-round table-icon">table_rows</span>
+                                            <div>
+                                                <h4>{ table.Name }</h4>
+                                                <span class="table-meta">
+                                                    { fmt.Sprintf("%d rows", table.RowCount) } · { table.Size }
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <span class="material-icons-round expand-icon">expand_more</span>
+                                    </div>
+                                    <div class="table-columns" style="display: none;">
+                                        for _, column := range table.Columns {
+                                            <div class="column-item">
+                                                <span class="column-name">{ column.Name }</span>
+                                                <div class="column-details">
+                                                    <span class="column-type">{ column.Type }</span>
+                                                    if column.IsPrimaryKey {
+                                                        <span class="column-badge primary">PK</span>
+                                                    }
+                                                    if column.IsForeignKey {
+                                                        <span class="column-badge foreign">FK</span>
+                                                    }
+                                                    if column.IsNullable {
+                                                        <span class="column-badge nullable">NULL</span>
+                                                    }
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <!-- Center Panel: Query Editor -->
+            <div class="query-panel">
+                <div class="query-editor-section">
+                    <div class="editor-header">
+                        <h3>Query Editor</h3>
+                        <div class="editor-actions">
+                            <button class="btn-text" onclick="formatQuery()">
+                                <span class="material-icons-round">format_align_left</span>
+                                Format
+                            </button>
+                            <button class="btn-text" onclick="saveQuery()">
+                                <span class="material-icons-round">save</span>
+                                Save
+                            </button>
+                            <button class="btn-primary" onclick="executeQuery()">
+                                <span class="material-icons-round">play_arrow</span>
+                                Execute
+                            </button>
+                        </div>
+                    </div>
+                    <div class="editor-container">
+                        <div class="line-numbers"></div>
+                        <textarea 
+                            class="sql-editor" 
+                            placeholder="Write your SQL query here..."
+                            spellcheck="false"
+                            autocomplete="off">SELECT * FROM users LIMIT 10;</textarea>
+                    </div>
+                </div>
+
+                <!-- Query Results -->
+                <div class="results-section">
+                    <div class="results-header">
+                        <h3>Results</h3>
+                        <div class="results-meta">
+                            <span class="result-count">0 rows</span>
+                            <span class="result-time">0ms</span>
+                        </div>
+                    </div>
+                    <div class="results-container">
+                        <div class="empty-results">
+                            <span class="material-icons-round">table_chart</span>
+                            <p>Execute a query to see results</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: Query History -->
+            <div class="history-panel">
+                <div class="panel-header">
+                    <h3>Query History</h3>
+                    <button class="btn-icon" onclick="clearHistory()">
+                        <span class="material-icons-round">clear_all</span>
+                    </button>
+                </div>
+                <div class="history-list">
+                    for _, query := range data.QueryHistory {
+                        <div class={ "history-item", query.Status } data-query-id={ query.ID }>
+                            <div class="history-header">
+                                <span class={ "status-icon", query.Status }>
+                                    if query.Status == "success" {
+                                        <span class="material-icons-round">check_circle</span>
+                                    } else {
+                                        <span class="material-icons-round">error</span>
+                                    }
+                                </span>
+                                <span class="history-time">{ query.Timestamp }</span>
+                            </div>
+                            <div class="history-query" onclick="loadQuery(this)">
+                                <code>{ truncateQuery(query.Query) }</code>
+                            </div>
+                            <div class="history-meta">
+                                if query.Status == "success" {
+                                    <span>{ fmt.Sprintf("%d rows", query.RowsAffected) }</span>
+                                    <span>{ query.Duration }</span>
+                                } else {
+                                    <span class="error-text">{ query.Error }</span>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+// Helper function to truncate long queries
+func truncateQuery(query string) string {
+    if len(query) > 100 {
+        return query[:97] + "..."
+    }
+    return query
+}

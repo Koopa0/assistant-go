@@ -4,7 +4,7 @@ log_level: debug
 log_format: text
 
 database:
-  url: "postgres://goassistant:goassistant@localhost:5432/goassistant_dev?sslmode=disable"
+  url: "postgres://koopa@localhost:5432/goassistant?sslmode=disable"
   max_connections: 10
   min_connections: 2
   max_idle_time: "10m"
@@ -32,11 +32,13 @@ cli:
 ai:
   default_provider: "claude"
   claude:
+    api_key: "${CLAUDE_API_KEY}"  # Will be overridden by environment variable
     model: "claude-3-sonnet-20240229"
     max_tokens: 4096
     temperature: 0.7
     base_url: "https://api.anthropic.com"
   gemini:
+    api_key: "${GEMINI_API_KEY}"  # Will be overridden by environment variable
     model: "gemini-pro"
     max_tokens: 4096
     temperature: 0.7

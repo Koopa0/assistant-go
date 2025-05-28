@@ -52,8 +52,15 @@ install-tools: ## Install development tools
 
 # Build targets
 .PHONY: build
-build: ## Build the application
+build: web-build ## Build the application with web assets
 	@echo "Building $(BINARY_NAME)..."
+	@mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
+	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
+
+.PHONY: build-go-only
+build-go-only: ## Build only the Go application (no web assets)
+	@echo "Building $(BINARY_NAME) (Go only)..."
 	@mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH)
 	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
@@ -162,7 +169,51 @@ sqlc-generate: ## Generate SQL code with sqlc
 .PHONY: templ-generate
 templ-generate: ## Generate templates with templ
 	@echo "Generating templates..."
-	@find . -name "*.templ" -exec templ generate {} \;
+	templ generate
+
+.PHONY: web-build
+web-build: templ-generate ## Build web assets (Templ + CSS)
+	@echo "Building web assets..."
+	@mkdir -p internal/web/static/css internal/web/static/js
+	@echo "Using enhanced MD3 CSS file..."
+	@cp internal/web/static/css/md3-enhanced.css internal/web/static/css/tailwind.css 2>/dev/null || echo "Enhanced MD3 CSS already in place"
+	@if [ ! -f "internal/web/static/js/htmx.min.js" ]; then \
+		echo "Downloading HTMX..."; \
+		curl -sL https://unpkg.com/htmx.org@1.9.10/dist/htmx.min.js -o internal/web/static/js/htmx.min.js; \
+	fi
+	@echo "Web assets built successfully!"
+
+.PHONY: web-dev
+web-dev: install-tools ## Start web development with file watching
+	@echo "Starting web development mode..."
+	@templ generate --watch &
+	@if command -v tailwindcss >/dev/null 2>&1; then \
+		tailwindcss -i internal/web/static/css/material-design.css -o internal/web/static/css/tailwind.css --watch & \
+	elif [ -f "node_modules/.bin/tailwindcss" ]; then \
+		./node_modules/.bin/tailwindcss -i internal/web/static/css/material-design.css -o internal/web/static/css/tailwind.css --watch & \
+	fi
+	@echo "File watchers started. Starting application..."
+	@go run $(MAIN_PATH)
+
+.PHONY: web-clean
+web-clean: ## Clean generated web assets
+	@echo "Cleaning web assets..."
+	@find internal/web/templates -name "*_templ.go" -delete 2>/dev/null || true
+	@rm -f internal/web/static/css/tailwind.css
+	@echo "Web assets cleaned!"
+
+.PHONY: web-deps
+web-deps: ## Install web dependencies
+	@echo "Installing web dependencies..."
+	@if command -v npm >/dev/null 2>&1; then \
+		npm install -D tailwindcss; \
+	else \
+		echo "npm not found. Installing standalone Tailwind CSS..."; \
+		curl -sLO https://github.com/tailwindlabs/tailwindcss/releases/latest/download/tailwindcss-macos-x64; \
+		chmod +x tailwindcss-macos-x64; \
+		sudo mv tailwindcss-macos-x64 /usr/local/bin/tailwindcss; \
+	fi
+	@echo "Web dependencies installed!"
 
 # Database targets
 .PHONY: migrate-up

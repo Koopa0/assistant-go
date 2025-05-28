@@ -1,0 +1,98 @@
+package templates
+
+import "github.com/koopa0/assistant-go/internal/web/i18n"
+
+type HomePageData struct {
+	AppLayoutData
+	UserName string
+	RecentChats []RecentChat
+}
+
+type RecentChat struct {
+	ID string
+	Title string
+	LastMessage string
+	Timestamp string
+}
+
+// HomePage implements the modern home page design from ui.md
+templ HomePage(data HomePageData) {
+	@AppLayout(data.AppLayoutData, homePageContent(data))
+}
+
+templ homePageContent(data HomePageData) {
+	<div class="home-hero">
+		<h1 class="home-title">
+			if data.UserName != "" {
+				{ i18n.T("home.greeting_personal", data.Lang) }, { data.UserName }
+			} else {
+				{ i18n.T("home.greeting_generic", data.Lang) }
+			}
+		</h1>
+		<p class="home-subtitle">
+			{ i18n.T("home.subtitle", data.Lang) }
+		</p>
+		
+		<div class="home-input-container">
+			<form action="/api/chat/new" method="post" class="home-input-wrapper">
+				<input 
+					type="text" 
+					name="message"
+					class="home-input" 
+					placeholder={ i18n.T("home.input_placeholder", data.Lang) }
+					autofocus
+				/>
+				<button type="submit" class="btn btn-primary btn-icon home-input-button">
+					<span class="material-symbols-rounded">send</span>
+				</button>
+			</form>
+		</div>
+		
+		<div class="suggestion-grid">
+			<div class="suggestion-card" onclick="populateInput('Help me analyze Go code performance')">
+				<div class="suggestion-icon">🚀</div>
+				<div class="suggestion-text">{ i18n.T("home.suggestion_performance", data.Lang) }</div>
+			</div>
+			
+			<div class="suggestion-card" onclick="populateInput('Optimize my PostgreSQL queries')">
+				<div class="suggestion-icon">🗄️</div>
+				<div class="suggestion-text">{ i18n.T("home.suggestion_database", data.Lang) }</div>
+			</div>
+			
+			<div class="suggestion-card" onclick="populateInput('Debug Kubernetes deployment issues')">
+				<div class="suggestion-icon">☸️</div>
+				<div class="suggestion-text">{ i18n.T("home.suggestion_kubernetes", data.Lang) }</div>
+			</div>
+			
+			<div class="suggestion-card" onclick="populateInput('Write unit tests for my Go functions')">
+				<div class="suggestion-icon">🧪</div>
+				<div class="suggestion-text">{ i18n.T("home.suggestion_testing", data.Lang) }</div>
+			</div>
+		</div>
+		
+		if len(data.RecentChats) > 0 {
+			<div class="mt-4">
+				<h3 class="text-lg mb-3">{ i18n.T("home.recent_chats", data.Lang) }</h3>
+				<div class="recent-chats">
+					for _, chat := range data.RecentChats {
+						<a href={ templ.URL("/chat/" + chat.ID) } class="recent-item">
+							<div class="recent-content">
+								<div class="recent-item-title">{ chat.Title }</div>
+								<div class="recent-item-preview">{ chat.LastMessage }</div>
+							</div>
+							<span class="recent-timestamp">{ chat.Timestamp }</span>
+						</a>
+					}
+				</div>
+			</div>
+		}
+	</div>
+	
+	<script>
+		function populateInput(text) {
+			const input = document.querySelector('.home-input');
+			input.value = text;
+			input.focus();
+		}
+	</script>
+}

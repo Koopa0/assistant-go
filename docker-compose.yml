@@ -63,7 +63,7 @@ services:
       - APP_MODE=development
       - LOG_LEVEL=debug
       - LOG_FORMAT=json
-      - DATABASE_URL=postgres://goassistant:goassistant@postgres:5432/goassistant_dev?sslmode=disable
+      - DATABASE_URL=postgres://koopa@postgres:5432/goassistant?sslmode=disable
       - SEARXNG_URL=http://searxng:8080
       - SERVER_ADDRESS=:8080
     volumes:

@@ -183,10 +183,12 @@ func TestServiceExecuteChain(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	request := &chains.ChainRequest{
-		UserID:  "test-user",
-		Input:   "test input",
-		Context: map[string]interface{}{"test": "context"},
+	request := &ChainExecutionRequest{
+		UserID: "test-user",
+		ChainRequest: &chains.ChainRequest{
+			Input:   "test input",
+			Context: map[string]interface{}{"test": "context"},
+		},
 	}
 
 	response, err := service.ExecuteChain(ctx, chains.ChainTypeSequential, request)

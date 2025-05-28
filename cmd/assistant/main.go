@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/koopa0/assistant-go/internal/assistant"
 	"github.com/koopa0/assistant-go/internal/cli"
 	"github.com/koopa0/assistant-go/internal/config"
@@ -42,6 +43,21 @@ func main() {
 	// Setup graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Load environment variables from .env file if it exists
+	// This allows flexible configuration: .env for simple setups, YAML for complex ones
+	if err := godotenv.Load(); err != nil {
+		// .env file is optional, so we only warn if it exists but can't be loaded
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Warning: Error loading .env file: %v\n", err)
+		}
+	}
+
+	// Allow environment variable to override config file preference
+	if configMode := os.Getenv("CONFIG_MODE"); configMode == "env-only" {
+		// When CONFIG_MODE=env-only, skip YAML config and rely on environment variables only
+		os.Setenv("CONFIG_FILE", "")
+	}
 
 	// Load configuration
 	cfg, err := config.Load()
