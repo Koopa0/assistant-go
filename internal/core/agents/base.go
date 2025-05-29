@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	ctxpkg "github.com/koopa0/assistant/internal/core/context"
+	corecontext "github.com/koopa0/assistant/internal/core/context"
 )
 
 // Agent represents an AI agent with specialized capabilities
@@ -21,9 +21,9 @@ type Agent interface {
 	GetStatus() AgentStatus
 
 	// Execution methods
-	CanHandle(ctx context.Context, request *ctxpkg.ContextualRequest) (bool, float64)
-	Execute(ctx context.Context, request *ctxpkg.ContextualRequest) (*AgentResponse, error)
-	Collaborate(ctx context.Context, other Agent, request *ctxpkg.ContextualRequest) (*CollaborationResult, error)
+	CanHandle(ctx context.Context, request *corecontext.ContextualRequest) (bool, float64)
+	Execute(ctx context.Context, request *corecontext.ContextualRequest) (*AgentResponse, error)
+	Collaborate(ctx context.Context, other Agent, request *corecontext.ContextualRequest) (*CollaborationResult, error)
 
 	// Learning and adaptation
 	Learn(ctx context.Context, feedback *Feedback) error
@@ -100,7 +100,7 @@ const (
 // AgentState represents the internal state of an agent
 type AgentState struct {
 	CurrentTask    *Task
-	ActiveContext  *ctxpkg.ContextualRequest
+	ActiveContext  *corecontext.ContextualRequest
 	RecentActions  []Action
 	Collaborations []CollaborationInfo
 	Performance    PerformanceMetrics
@@ -499,7 +499,7 @@ const (
 
 // Environment represents the agent's operating environment
 type Environment struct {
-	Context     *ctxpkg.ContextualRequest
+	Context     *corecontext.ContextualRequest
 	Resources   Resources
 	Constraints []Constraint
 	Goals       []Goal

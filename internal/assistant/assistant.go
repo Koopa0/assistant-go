@@ -9,6 +9,7 @@ import (
 	"github.com/koopa0/assistant/internal/config"
 	"github.com/koopa0/assistant/internal/storage/postgres"
 	"github.com/koopa0/assistant/internal/tools"
+	"github.com/koopa0/assistant/internal/tools/godev"
 )
 
 // Assistant represents the core assistant interface
@@ -219,18 +220,30 @@ func (a *Assistant) Close(ctx context.Context) error {
 
 // registerBuiltinTools registers the built-in tools
 func (a *Assistant) registerBuiltinTools(ctx context.Context) error {
-	// TODO: Register built-in tools as they are implemented
-	// This will be expanded in Phase 3 when we implement the tool system
-
 	a.logger.Debug("Registering built-in tools...")
 
-	// Placeholder for tool registration
-	// Example:
-	// if err := a.registry.Register("postgres", postgresToolFactory); err != nil {
-	//     return fmt.Errorf("failed to register postgres tool: %w", err)
-	// }
+	// Register Go development tools
+	if err := a.registerGoTools(); err != nil {
+		return fmt.Errorf("failed to register Go tools: %w", err)
+	}
+
+	// TODO: Register additional tools as they are implemented
+	// PostgreSQL tools, Docker tools, Kubernetes tools, etc.
 
 	a.logger.Debug("Built-in tools registered successfully")
+	return nil
+}
+
+// registerGoTools registers Go development tools
+func (a *Assistant) registerGoTools() error {
+	// Register Go Analyzer
+	if err := a.registry.Register("go_analyzer", func(config map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+		return godev.NewGoAnalyzer(config, logger)
+	}); err != nil {
+		return fmt.Errorf("failed to register go_analyzer: %w", err)
+	}
+
+	a.logger.Debug("Go development tools registered")
 	return nil
 }
 
@@ -275,4 +288,30 @@ func (a *Assistant) Stats(ctx context.Context) (map[string]interface{}, error) {
 	}
 
 	return stats, nil
+}
+
+// ExecuteTool executes a tool directly
+func (a *Assistant) ExecuteTool(ctx context.Context, toolName string, input map[string]interface{}, config map[string]interface{}) (*tools.ToolResult, error) {
+	a.logger.Info("Executing tool directly",
+		slog.String("tool", toolName),
+		slog.Any("input", input))
+
+	if config == nil {
+		config = make(map[string]interface{})
+	}
+
+	result, err := a.registry.Execute(ctx, toolName, input, config)
+	if err != nil {
+		a.logger.Error("Tool execution failed",
+			slog.String("tool", toolName),
+			slog.Any("error", err))
+		return nil, err
+	}
+
+	a.logger.Info("Tool execution completed",
+		slog.String("tool", toolName),
+		slog.Bool("success", result.Success),
+		slog.Duration("execution_time", result.ExecutionTime))
+
+	return result, nil
 }

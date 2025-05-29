@@ -105,6 +105,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("DELETE /api/conversations/{id}", s.handleDeleteConversation)
 	s.mux.HandleFunc("GET /api/tools", s.handleListTools)
 	s.mux.HandleFunc("GET /api/tools/{name}", s.handleGetTool)
+	s.mux.HandleFunc("POST /api/tools/{name}/execute", s.handleExecuteTool)
 
 	s.logger.Debug("HTTP API routes configured")
 }
@@ -278,4 +279,39 @@ func (s *Server) handleGetTool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSONResponse(w, http.StatusOK, toolInfo)
+}
+
+// Execute tool endpoint
+func (s *Server) handleExecuteTool(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+
+	toolName := r.PathValue("name")
+	if toolName == "" {
+		http.Error(w, "Tool name is required", http.StatusBadRequest)
+		return
+	}
+
+	// Parse request body
+	var request struct {
+		Input  map[string]interface{} `json:"input"`
+		Config map[string]interface{} `json:"config,omitempty"`
+	}
+
+	if err := s.parseJSONRequest(r, &request); err != nil {
+		s.logger.Warn("Invalid tool execution request", slog.Any("error", err))
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// Execute tool through assistant
+	result, err := s.assistant.ExecuteTool(ctx, toolName, request.Input, request.Config)
+	if err != nil {
+		s.logger.Error("Tool execution failed",
+			slog.String("tool", toolName),
+			slog.Any("error", err))
+		http.Error(w, fmt.Sprintf("Tool execution failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	s.writeJSONResponse(w, http.StatusOK, result)
 }

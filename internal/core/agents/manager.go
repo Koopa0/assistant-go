@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	ctxpkg "github.com/koopa0/assistant/internal/core/context"
+	corecontext "github.com/koopa0/assistant/internal/core/context"
 )
 
 // AgentManager orchestrates multiple AI agents
@@ -37,7 +37,7 @@ type AgentScheduler struct {
 // ScheduledTask represents a task scheduled for execution
 type ScheduledTask struct {
 	ID                string
-	Request           *ctxpkg.ContextualRequest
+	Request           *corecontext.ContextualRequest
 	RequiredDomain    Domain
 	Priority          Priority
 	Deadline          *time.Time
@@ -647,7 +647,7 @@ func (am *AgentManager) UnregisterAgent(agentID string) error {
 }
 
 // ProcessRequest processes a request using the most suitable agent(s)
-func (am *AgentManager) ProcessRequest(ctx context.Context, request *ctxpkg.ContextualRequest) (*AgentResponse, error) {
+func (am *AgentManager) ProcessRequest(ctx context.Context, request *corecontext.ContextualRequest) (*AgentResponse, error) {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
 
@@ -697,7 +697,7 @@ func (am *AgentManager) ProcessRequest(ctx context.Context, request *ctxpkg.Cont
 }
 
 // findSuitableAgents finds agents suitable for handling a request
-func (am *AgentManager) findSuitableAgents(ctx context.Context, request *ctxpkg.ContextualRequest) []AgentCandidate {
+func (am *AgentManager) findSuitableAgents(ctx context.Context, request *corecontext.ContextualRequest) []AgentCandidate {
 	var candidates []AgentCandidate
 
 	for _, agent := range am.agents {
@@ -773,7 +773,7 @@ func (am *AgentManager) executeTask(ctx context.Context, agent Agent, task *Sche
 
 // Helper methods
 
-func (am *AgentManager) inferDomain(request *ctxpkg.ContextualRequest) Domain {
+func (am *AgentManager) inferDomain(request *corecontext.ContextualRequest) Domain {
 	// Simple domain inference based on request content
 	query := strings.ToLower(request.Original.Query)
 
@@ -793,7 +793,7 @@ func (am *AgentManager) inferDomain(request *ctxpkg.ContextualRequest) Domain {
 	return DomainGeneral
 }
 
-func (am *AgentManager) inferPriority(request *ctxpkg.ContextualRequest) Priority {
+func (am *AgentManager) inferPriority(request *corecontext.ContextualRequest) Priority {
 	query := strings.ToLower(request.Original.Query)
 
 	if strings.Contains(query, "urgent") || strings.Contains(query, "critical") || strings.Contains(query, "emergency") {
@@ -809,7 +809,7 @@ func (am *AgentManager) inferPriority(request *ctxpkg.ContextualRequest) Priorit
 	return PriorityMedium
 }
 
-func (am *AgentManager) estimateDuration(request *ctxpkg.ContextualRequest) time.Duration {
+func (am *AgentManager) estimateDuration(request *corecontext.ContextualRequest) time.Duration {
 	// Simple duration estimation
 	queryLength := len(request.Original.Query)
 

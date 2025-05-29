@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/koopa0/assistant/internal/ai"
@@ -82,7 +83,16 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 		return nil, err // Already wrapped in appropriate error type
 	}
 
-	// Step 2: Get or create conversation context
+	// Step 2: Build enriched context from workspace and memory
+	enrichedContext, err := p.buildEnrichedContext(ctx, request)
+	if err != nil {
+		p.logger.Error("Failed to build enriched context",
+			slog.String("query", request.Query),
+			slog.Any("error", err))
+		return nil, NewProcessingFailedError("context enrichment failed", err)
+	}
+
+	// Step 3: Get or create conversation context
 	conversation, err := p.getOrCreateConversation(ctx, request)
 	if err != nil {
 		p.logger.Error("Failed to get conversation context",
@@ -95,10 +105,21 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 	p.logger.Debug("Conversation context established",
 		slog.String("conversation_id", conversation.ID),
 		slog.String("user_id", conversation.UserID),
-		slog.Int("message_count", len(conversation.Messages)))
+		slog.Int("message_count", len(conversation.Messages)),
+		slog.Any("workspace_context", enrichedContext["workspace"]),
+		slog.Any("memory_context", enrichedContext["memory"]))
 
-	// Step 3: Add user message to conversation
-	userMessage, err := p.context.AddMessage(ctx, conversation.ID, "user", request.Query, request.Context)
+	// Step 4: Add user message to conversation with enriched context
+	messageContext := request.Context
+	if messageContext == nil {
+		messageContext = make(map[string]interface{})
+	}
+	// Merge enriched context into message metadata
+	for key, value := range enrichedContext {
+		messageContext[key] = value
+	}
+
+	userMessage, err := p.context.AddMessage(ctx, conversation.ID, "user", request.Query, messageContext)
 	if err != nil {
 		p.logger.Error("Failed to add user message",
 			slog.String("conversation_id", conversation.ID),
@@ -111,7 +132,7 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 		slog.String("conversation_id", conversation.ID),
 		slog.String("message_id", userMessage.ID))
 
-	// Step 4: Determine AI provider and model
+	// Step 5: Determine AI provider and model
 	provider := p.config.AI.DefaultProvider
 	if request.Provider != nil {
 		provider = *request.Provider
@@ -131,13 +152,13 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 		model = *request.Model
 	}
 
-	// Step 5: Process with AI
+	// Step 6: Process with AI using enriched context
 	p.logger.Debug("Processing with AI provider",
 		slog.String("provider", provider),
 		slog.String("model", model),
 		slog.String("conversation_id", conversation.ID))
 
-	response, tokensUsed, err := p.processWithAI(ctx, conversation, request, provider, model)
+	response, tokensUsed, err := p.processWithAI(ctx, conversation, request, provider, model, enrichedContext)
 	if err != nil {
 		p.logger.Error("AI processing failed",
 			slog.String("provider", provider),
@@ -147,7 +168,7 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 		return nil, err // Already wrapped in appropriate error type
 	}
 
-	// Step 6: Add assistant response to conversation
+	// Step 7: Add assistant response to conversation
 	assistantMessage, err := p.context.AddMessage(ctx, conversation.ID, "assistant", response, nil)
 	if err != nil {
 		p.logger.Error("Failed to add assistant message to conversation",
@@ -162,7 +183,7 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 		slog.String("message_id", assistantMessage.ID),
 		slog.Int("response_length", len(response)))
 
-	// Step 7: Build response
+	// Step 8: Build response
 	queryResponse := &QueryResponse{
 		Response:       response,
 		ConversationID: conversation.ID,
@@ -177,7 +198,7 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 		},
 	}
 
-	// Step 8: Execute tools if any are requested
+	// Step 9: Execute tools if any are requested
 	if len(request.Tools) > 0 {
 		toolResults, err := p.executeTools(ctx, request.Tools, request.Context)
 		if err != nil {
@@ -285,8 +306,8 @@ func (p *Processor) generateConversationTitle(query string) string {
 	return title
 }
 
-// processWithAI processes the request with the AI provider
-func (p *Processor) processWithAI(ctx context.Context, conversation *Conversation, request *QueryRequest, provider, model string) (string, int, error) {
+// processWithAI processes the request with the AI provider using enriched context
+func (p *Processor) processWithAI(ctx context.Context, conversation *Conversation, request *QueryRequest, provider, model string, enrichedContext map[string]interface{}) (string, int, error) {
 	p.logger.Debug("Processing with AI provider",
 		slog.String("provider", provider),
 		slog.String("model", model),
@@ -316,17 +337,26 @@ func (p *Processor) processWithAI(ctx context.Context, conversation *Conversatio
 		Content: request.Query,
 	})
 
-	// Prepare AI request
+	// Prepare AI request with enriched context
+	requestMetadata := request.Context
+	if requestMetadata == nil {
+		requestMetadata = make(map[string]interface{})
+	}
+	// Merge enriched context
+	for key, value := range enrichedContext {
+		requestMetadata[key] = value
+	}
+
 	aiRequest := &ai.GenerateRequest{
 		Messages:    messages,
 		MaxTokens:   p.getMaxTokens(provider, request),
 		Temperature: p.getTemperature(provider, request),
 		Model:       model,
-		Metadata:    request.Context,
+		Metadata:    requestMetadata,
 	}
 
-	// Add system prompt if configured
-	systemPrompt := p.getSystemPrompt(provider)
+	// Add context-aware system prompt
+	systemPrompt := p.getContextAwareSystemPrompt(provider, enrichedContext)
 	if systemPrompt != "" {
 		aiRequest.SystemPrompt = &systemPrompt
 	}
@@ -640,4 +670,226 @@ You have access to various tools and can help with:
 Always provide helpful, accurate, and actionable responses. When using tools, explain what you're doing and why. If you're unsure about something, ask for clarification rather than making assumptions.
 
 Maintain a professional but friendly tone, and focus on practical solutions that follow best practices.`
+}
+
+// getContextAwareSystemPrompt returns a context-aware system prompt
+func (p *Processor) getContextAwareSystemPrompt(provider string, enrichedContext map[string]interface{}) string {
+	basePrompt := p.getSystemPrompt(provider)
+
+	// Add workspace context if available
+	if workspace, ok := enrichedContext["workspace"]; ok {
+		if workspaceMap, ok := workspace.(map[string]interface{}); ok {
+			workspaceInfo := "\n\n## Current Workspace Context:\n"
+
+			if projectType, ok := workspaceMap["project_type"]; ok {
+				workspaceInfo += fmt.Sprintf("- Project Type: %v\n", projectType)
+			}
+			if language, ok := workspaceMap["primary_language"]; ok {
+				workspaceInfo += fmt.Sprintf("- Primary Language: %v\n", language)
+			}
+			if projectPath, ok := workspaceMap["project_path"]; ok {
+				workspaceInfo += fmt.Sprintf("- Project Path: %v\n", projectPath)
+			}
+			if gitRepo, ok := workspaceMap["git_repository"]; ok {
+				workspaceInfo += fmt.Sprintf("- Git Repository: %v\n", gitRepo)
+			}
+			if frameworks, ok := workspaceMap["frameworks"]; ok {
+				workspaceInfo += fmt.Sprintf("- Frameworks: %v\n", frameworks)
+			}
+
+			basePrompt += workspaceInfo
+		}
+	}
+
+	// Add memory context if available
+	if memory, ok := enrichedContext["memory"]; ok {
+		if memoryMap, ok := memory.(map[string]interface{}); ok {
+			memoryInfo := "\n## Relevant Memory Context:\n"
+
+			if workingMemory, ok := memoryMap["working"]; ok {
+				memoryInfo += fmt.Sprintf("- Current Focus: %v\n", workingMemory)
+			}
+			if recentKnowledge, ok := memoryMap["recent_knowledge"]; ok {
+				memoryInfo += fmt.Sprintf("- Recent Knowledge: %v\n", recentKnowledge)
+			}
+			if userPreferences, ok := memoryMap["user_preferences"]; ok {
+				memoryInfo += fmt.Sprintf("- User Preferences: %v\n", userPreferences)
+			}
+
+			basePrompt += memoryInfo
+		}
+	}
+
+	// Add final instruction
+	basePrompt += "\n\nUse this context to provide more relevant and personalized assistance. Reference the workspace details and previous interactions when appropriate."
+
+	return basePrompt
+}
+
+// buildEnrichedContext builds enriched context from workspace detection and memory
+func (p *Processor) buildEnrichedContext(ctx context.Context, request *QueryRequest) (map[string]interface{}, error) {
+	enrichedContext := make(map[string]interface{})
+
+	// Step 1: Detect workspace context
+	workspaceContext, err := p.detectWorkspaceContext(ctx, request)
+	if err != nil {
+		p.logger.Warn("Failed to detect workspace context", slog.Any("error", err))
+		workspaceContext = make(map[string]interface{})
+	}
+	enrichedContext["workspace"] = workspaceContext
+
+	// Step 2: Retrieve relevant memory context
+	memoryContext, err := p.retrieveMemoryContext(ctx, request)
+	if err != nil {
+		p.logger.Warn("Failed to retrieve memory context", slog.Any("error", err))
+		memoryContext = make(map[string]interface{})
+	}
+	enrichedContext["memory"] = memoryContext
+
+	// Step 3: Analyze query intent and classify
+	queryContext, err := p.analyzeQueryContext(ctx, request)
+	if err != nil {
+		p.logger.Warn("Failed to analyze query context", slog.Any("error", err))
+		queryContext = make(map[string]interface{})
+	}
+	enrichedContext["query"] = queryContext
+
+	p.logger.Debug("Built enriched context",
+		slog.Any("workspace_keys", getMapKeys(workspaceContext)),
+		slog.Any("memory_keys", getMapKeys(memoryContext)),
+		slog.Any("query_keys", getMapKeys(queryContext)))
+
+	return enrichedContext, nil
+}
+
+// detectWorkspaceContext detects the current workspace context
+func (p *Processor) detectWorkspaceContext(ctx context.Context, request *QueryRequest) (map[string]interface{}, error) {
+	workspaceContext := make(map[string]interface{})
+
+	// Default workspace detection - in production this would be more sophisticated
+	workspaceContext["project_type"] = "go_project"
+	workspaceContext["primary_language"] = "go"
+	workspaceContext["project_path"] = "/Users/koopa/go/src/github.com/koopa0/assistant-go"
+	workspaceContext["git_repository"] = "assistant-go"
+	workspaceContext["frameworks"] = []string{"net/http", "pgx", "slog"}
+	workspaceContext["tools_available"] = []string{"go_analyzer", "docker", "kubernetes"}
+	workspaceContext["detected_at"] = time.Now()
+
+	// TODO: Implement actual workspace detection:
+	// - Check current working directory
+	// - Analyze project files (go.mod, package.json, requirements.txt, etc.)
+	// - Detect git repository information
+	// - Identify frameworks and dependencies
+	// - Check for configuration files
+
+	return workspaceContext, nil
+}
+
+// retrieveMemoryContext retrieves relevant memory context
+func (p *Processor) retrieveMemoryContext(ctx context.Context, request *QueryRequest) (map[string]interface{}, error) {
+	memoryContext := make(map[string]interface{})
+
+	// Default memory context - in production this would query the memory systems
+	memoryContext["working"] = "Implementing context integration for GoAssistant"
+	memoryContext["recent_knowledge"] = []string{
+		"Go code analysis tools implemented",
+		"Context engine architecture defined",
+		"Memory systems designed and documented",
+	}
+	memoryContext["user_preferences"] = map[string]interface{}{
+		"preferred_language": "go",
+		"code_style":         "standard_library_focused",
+		"documentation":      "comprehensive",
+	}
+	memoryContext["session_context"] = map[string]interface{}{
+		"previous_queries": 0, // Would be actual count
+		"session_start":    time.Now(),
+		"topics_discussed": []string{},
+	}
+
+	// TODO: Implement actual memory retrieval:
+	// - Query episodic memory for recent interactions
+	// - Retrieve semantic knowledge relevant to the query
+	// - Get procedural memory for relevant workflows
+	// - Access user preferences and personalization data
+
+	return memoryContext, nil
+}
+
+// analyzeQueryContext analyzes the query for intent and context
+func (p *Processor) analyzeQueryContext(ctx context.Context, request *QueryRequest) (map[string]interface{}, error) {
+	queryContext := make(map[string]interface{})
+
+	query := request.Query
+
+	// Simple intent classification
+	intent := "general"
+	if containsAny(query, []string{"analyze", "review", "check", "audit"}) {
+		intent = "code_analysis"
+	} else if containsAny(query, []string{"implement", "create", "build", "develop"}) {
+		intent = "development"
+	} else if containsAny(query, []string{"debug", "fix", "error", "bug"}) {
+		intent = "debugging"
+	} else if containsAny(query, []string{"deploy", "kubernetes", "docker", "container"}) {
+		intent = "infrastructure"
+	} else if containsAny(query, []string{"explain", "how", "what", "why"}) {
+		intent = "explanation"
+	}
+
+	queryContext["intent"] = intent
+	queryContext["query_length"] = len(query)
+	queryContext["query_complexity"] = classifyComplexity(query)
+	queryContext["potential_tools"] = suggestTools(query)
+	queryContext["analyzed_at"] = time.Now()
+
+	return queryContext, nil
+}
+
+// Helper functions
+func getMapKeys(m map[string]interface{}) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func containsAny(text string, keywords []string) bool {
+	textLower := strings.ToLower(text)
+	for _, keyword := range keywords {
+		keywordLower := strings.ToLower(keyword)
+		if strings.Contains(textLower, keywordLower) {
+			return true
+		}
+	}
+	return false
+}
+
+func classifyComplexity(query string) string {
+	length := len(query)
+	if length < 50 {
+		return "simple"
+	} else if length < 200 {
+		return "medium"
+	}
+	return "complex"
+}
+
+func suggestTools(query string) []string {
+	tools := make([]string, 0)
+
+	if containsAny(query, []string{"analyze", "go", "code", "function", "struct"}) {
+		tools = append(tools, "go_analyzer")
+	}
+	if containsAny(query, []string{"docker", "container", "image"}) {
+		tools = append(tools, "docker")
+	}
+	if containsAny(query, []string{"kubernetes", "k8s", "pod", "deployment"}) {
+		tools = append(tools, "kubernetes")
+	}
+	if containsAny(query, []string{"database", "postgres", "sql", "query"}) {
+		tools = append(tools, "postgres")
+	}
+
+	return tools
 }

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	ctxpkg "github.com/koopa0/assistant/internal/core/context"
+	corecontext "github.com/koopa0/assistant/internal/core/context"
 )
 
 // DevelopmentAgent is a specialist agent for software development tasks
@@ -724,7 +724,7 @@ func NewDevelopmentAgent(id, name string, logger *slog.Logger) *DevelopmentAgent
 }
 
 // CanHandle determines if this agent can handle the request
-func (da *DevelopmentAgent) CanHandle(ctx context.Context, request *ctxpkg.ContextualRequest) (bool, float64) {
+func (da *DevelopmentAgent) CanHandle(ctx context.Context, request *corecontext.ContextualRequest) (bool, float64) {
 	query := strings.ToLower(request.Original.Query)
 
 	// Development-related keywords
@@ -743,16 +743,16 @@ func (da *DevelopmentAgent) CanHandle(ctx context.Context, request *ctxpkg.Conte
 	}
 
 	// Check project type
-	if request.Workspace.ProjectType == ctxpkg.ProjectTypeGo ||
-		request.Workspace.ProjectType == ctxpkg.ProjectTypeJavaScript ||
-		request.Workspace.ProjectType == ctxpkg.ProjectTypePython {
+	if request.Workspace.ProjectType == corecontext.ProjectTypeGo ||
+		request.Workspace.ProjectType == corecontext.ProjectTypeJavaScript ||
+		request.Workspace.ProjectType == corecontext.ProjectTypePython {
 		confidence += 0.2
 	}
 
 	// Check semantic intent
-	if request.Semantics.Intent == ctxpkg.IntentDebug ||
-		request.Semantics.Intent == ctxpkg.IntentOptimize ||
-		request.Semantics.Intent == ctxpkg.IntentAnalyze {
+	if request.Semantics.Intent == corecontext.IntentDebug ||
+		request.Semantics.Intent == corecontext.IntentOptimize ||
+		request.Semantics.Intent == corecontext.IntentAnalyze {
 		confidence += 0.3
 	}
 
@@ -772,7 +772,7 @@ func (da *DevelopmentAgent) CanHandle(ctx context.Context, request *ctxpkg.Conte
 }
 
 // Execute executes a development task
-func (da *DevelopmentAgent) Execute(ctx context.Context, request *ctxpkg.ContextualRequest) (*AgentResponse, error) {
+func (da *DevelopmentAgent) Execute(ctx context.Context, request *corecontext.ContextualRequest) (*AgentResponse, error) {
 	da.SetStatus(StatusActive)
 	defer da.SetStatus(StatusIdle)
 
@@ -846,7 +846,7 @@ func (da *DevelopmentAgent) Execute(ctx context.Context, request *ctxpkg.Context
 
 // Helper methods for different task types
 
-func (da *DevelopmentAgent) classifyTask(request *ctxpkg.ContextualRequest) TaskType {
+func (da *DevelopmentAgent) classifyTask(request *corecontext.ContextualRequest) TaskType {
 	query := strings.ToLower(request.Original.Query)
 
 	if strings.Contains(query, "analyze") || strings.Contains(query, "review") {
@@ -868,7 +868,7 @@ func (da *DevelopmentAgent) classifyTask(request *ctxpkg.ContextualRequest) Task
 	return TaskAnalysis // Default
 }
 
-func (da *DevelopmentAgent) analyzeCode(ctx context.Context, request *ctxpkg.ContextualRequest) (*AgentResponse, error) {
+func (da *DevelopmentAgent) analyzeCode(ctx context.Context, request *corecontext.ContextualRequest) (*AgentResponse, error) {
 	// Simulate code analysis
 	analysis := "Code Analysis Results:\n"
 	analysis += "- Code quality: Good (Score: 8.5/10)\n"
@@ -907,7 +907,7 @@ func (da *DevelopmentAgent) analyzeCode(ctx context.Context, request *ctxpkg.Con
 	}, nil
 }
 
-func (da *DevelopmentAgent) debugIssue(ctx context.Context, request *ctxpkg.ContextualRequest) (*AgentResponse, error) {
+func (da *DevelopmentAgent) debugIssue(ctx context.Context, request *corecontext.ContextualRequest) (*AgentResponse, error) {
 	// Simulate debugging process
 	debugResult := "Debug Analysis:\n"
 	debugResult += "1. Issue identified in error handling logic\n"
@@ -931,7 +931,7 @@ func (da *DevelopmentAgent) debugIssue(ctx context.Context, request *ctxpkg.Cont
 	}, nil
 }
 
-func (da *DevelopmentAgent) optimizeCode(ctx context.Context, request *ctxpkg.ContextualRequest) (*AgentResponse, error) {
+func (da *DevelopmentAgent) optimizeCode(ctx context.Context, request *corecontext.ContextualRequest) (*AgentResponse, error) {
 	// Simulate optimization analysis
 	optimizationResult := "Performance Optimization Recommendations:\n"
 	optimizationResult += "1. Database query optimization: 40% improvement potential\n"
@@ -953,7 +953,7 @@ func (da *DevelopmentAgent) optimizeCode(ctx context.Context, request *ctxpkg.Co
 	}, nil
 }
 
-func (da *DevelopmentAgent) generateTests(ctx context.Context, request *ctxpkg.ContextualRequest) (*AgentResponse, error) {
+func (da *DevelopmentAgent) generateTests(ctx context.Context, request *corecontext.ContextualRequest) (*AgentResponse, error) {
 	// Simulate test generation
 	testResult := "Test Generation Results:\n"
 	testResult += "Generated 15 unit tests with 85% coverage\n"
@@ -977,7 +977,7 @@ func (da *DevelopmentAgent) generateTests(ctx context.Context, request *ctxpkg.C
 	}, nil
 }
 
-func (da *DevelopmentAgent) reviewCode(ctx context.Context, request *ctxpkg.ContextualRequest) (*AgentResponse, error) {
+func (da *DevelopmentAgent) reviewCode(ctx context.Context, request *corecontext.ContextualRequest) (*AgentResponse, error) {
 	// Simulate code review
 	reviewResult := "Code Review Summary:\n"
 	reviewResult += "Overall Score: 8.2/10\n"
@@ -1003,7 +1003,7 @@ func (da *DevelopmentAgent) reviewCode(ctx context.Context, request *ctxpkg.Cont
 	}, nil
 }
 
-func (da *DevelopmentAgent) handleGenericDevelopmentTask(ctx context.Context, request *ctxpkg.ContextualRequest) (*AgentResponse, error) {
+func (da *DevelopmentAgent) handleGenericDevelopmentTask(ctx context.Context, request *corecontext.ContextualRequest) (*AgentResponse, error) {
 	// Handle generic development requests
 	result := "Development Task Analysis:\n"
 	result += "Analyzed your development request and identified the following areas for assistance:\n"
@@ -1027,7 +1027,7 @@ func (da *DevelopmentAgent) handleGenericDevelopmentTask(ctx context.Context, re
 
 // Implement remaining Agent interface methods
 
-func (da *DevelopmentAgent) Collaborate(ctx context.Context, other Agent, request *ctxpkg.ContextualRequest) (*CollaborationResult, error) {
+func (da *DevelopmentAgent) Collaborate(ctx context.Context, other Agent, request *corecontext.ContextualRequest) (*CollaborationResult, error) {
 	// Implement collaboration logic
 	return &CollaborationResult{
 		PrimaryResponse: &AgentResponse{
