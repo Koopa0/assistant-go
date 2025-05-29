@@ -12,7 +12,7 @@ import (
 	"github.com/tmc/langchaingo/memory"
 	"github.com/tmc/langchaingo/schema"
 
-	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant/internal/config"
 )
 
 // Local type definitions to avoid import cycles

@@ -1,4 +1,4 @@
-# GoAssistant Docker Compose
+# Assistant Docker Compose
 # Development environment setup
 
 version: '3.8'
@@ -51,7 +51,7 @@ services:
     networks:
       - goassistant
 
-  # GoAssistant application
+  # Assistant application
   goassistant:
     build:
       context: .

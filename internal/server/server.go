@@ -7,22 +7,21 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/koopa0/assistant-go/internal/assistant"
-	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/observability"
+	"github.com/koopa0/assistant/internal/assistant"
+	"github.com/koopa0/assistant/internal/config"
+	"github.com/koopa0/assistant/internal/observability"
 )
 
-// Server represents the HTTP server
+// Server represents the HTTP API server
 type Server struct {
 	config    config.ServerConfig
 	assistant *assistant.Assistant
 	logger    *slog.Logger
 	server    *http.Server
 	mux       *http.ServeMux
-	webServer *WebServer
 }
 
-// New creates a new HTTP server
+// New creates a new HTTP API server
 func New(cfg config.ServerConfig, assistant *assistant.Assistant, logger *slog.Logger) (*Server, error) {
 	if assistant == nil {
 		return nil, fmt.Errorf("assistant is required")
@@ -33,10 +32,6 @@ func New(cfg config.ServerConfig, assistant *assistant.Assistant, logger *slog.L
 
 	// Create server mux
 	mux := http.NewServeMux()
-
-	// Initialize web server for Material Design 3 interface
-	webServer := NewWebServer(assistant, logger)
-	webServer.SetupRoutes()
 
 	// Create HTTP server
 	httpServer := &http.Server{
@@ -53,7 +48,6 @@ func New(cfg config.ServerConfig, assistant *assistant.Assistant, logger *slog.L
 		logger:    observability.ServerLogger(logger, "http"),
 		server:    httpServer,
 		mux:       mux,
-		webServer: webServer,
 	}
 
 	// Setup routes
@@ -62,9 +56,9 @@ func New(cfg config.ServerConfig, assistant *assistant.Assistant, logger *slog.L
 	return server, nil
 }
 
-// Start starts the HTTP server
+// Start starts the HTTP API server
 func (s *Server) Start(ctx context.Context) error {
-	s.logger.Info("Starting HTTP server",
+	s.logger.Info("Starting HTTP API server",
 		slog.String("address", s.config.Address),
 		slog.Bool("tls_enabled", s.config.EnableTLS))
 
@@ -81,7 +75,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 // Shutdown gracefully shuts down the server
 func (s *Server) Shutdown(ctx context.Context) error {
-	s.logger.Info("Shutting down HTTP server...")
+	s.logger.Info("Shutting down HTTP API server...")
 
 	// Create shutdown context with timeout
 	shutdownCtx, cancel := context.WithTimeout(ctx, s.config.ShutdownTimeout)
@@ -92,17 +86,17 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		return fmt.Errorf("server shutdown failed: %w", err)
 	}
 
-	s.logger.Info("HTTP server shutdown complete")
+	s.logger.Info("HTTP API server shutdown complete")
 	return nil
 }
 
-// setupRoutes sets up the HTTP routes
+// setupRoutes sets up the HTTP API routes
 func (s *Server) setupRoutes() {
 	// Apply middleware
 	handler := s.withMiddleware(s.mux)
 	s.server.Handler = handler
 
-	// Legacy API routes (keep for backward compatibility)
+	// API routes
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/status", s.handleStatus)
 	s.mux.HandleFunc("POST /api/query", s.handleQuery)
@@ -112,10 +106,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/tools", s.handleListTools)
 	s.mux.HandleFunc("GET /api/tools/{name}", s.handleGetTool)
 
-	// Mount the new Material Design 3 web interface
-	s.mux.Handle("/", s.webServer)
-
-	s.logger.Debug("HTTP routes configured with Material Design 3 web interface")
+	s.logger.Debug("HTTP API routes configured")
 }
 
 // withMiddleware applies middleware to the handler
@@ -287,102 +278,4 @@ func (s *Server) handleGetTool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSONResponse(w, http.StatusOK, toolInfo)
-}
-
-// Web UI endpoints (placeholders)
-func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement web UI with Templ templates
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-    <title>GoAssistant</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; background: #121212; color: #00FF88; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .header { text-align: center; margin-bottom: 40px; }
-        .title { color: #0095FF; font-size: 2.5em; margin-bottom: 10px; }
-        .subtitle { color: #00FF88; font-size: 1.2em; }
-        .nav { margin: 20px 0; }
-        .nav a { color: #0095FF; text-decoration: none; margin: 0 15px; }
-        .nav a:hover { color: #00FF88; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1 class="title">GoAssistant</h1>
-            <p class="subtitle">AI-powered development assistant</p>
-        </div>
-        <div class="nav">
-            <a href="/chat">Chat Interface</a>
-            <a href="/tools">Available Tools</a>
-            <a href="/api/health">Health Check</a>
-            <a href="/api/status">Status</a>
-        </div>
-        <p>Welcome to GoAssistant! This is a placeholder page. The full web UI will be implemented in Phase 4.</p>
-    </div>
-</body>
-</html>`)
-}
-
-func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement chat interface
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-    <title>GoAssistant - Chat</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; background: #121212; color: #00FF88; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .title { color: #0095FF; text-align: center; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1 class="title">Chat Interface</h1>
-        <p>Chat interface will be implemented in Phase 4 with Templ + HTMX.</p>
-        <p><a href="/" style="color: #0095FF;">← Back to Home</a></p>
-    </div>
-</body>
-</html>`)
-}
-
-func (s *Server) handleToolsPage(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement tools page
-	tools := s.assistant.GetAvailableTools()
-
-	w.Header().Set("Content-Type", "text/html")
-	fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-    <title>GoAssistant - Tools</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; background: #121212; color: #00FF88; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .title { color: #0095FF; text-align: center; }
-        .tool { margin: 20px 0; padding: 15px; border: 1px solid #0095FF; border-radius: 5px; }
-        .tool-name { color: #0095FF; font-weight: bold; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1 class="title">Available Tools</h1>
-        <p>Total tools: %d</p>`, len(tools))
-
-	for _, tool := range tools {
-		fmt.Fprintf(w, `
-        <div class="tool">
-            <div class="tool-name">%s</div>
-            <div>%s</div>
-            <div>Category: %s | Version: %s</div>
-        </div>`, tool.Name, tool.Description, tool.Category, tool.Version)
-	}
-
-	fmt.Fprintf(w, `
-        <p><a href="/" style="color: #0095FF;">← Back to Home</a></p>
-    </div>
-</body>
-</html>`)
 }

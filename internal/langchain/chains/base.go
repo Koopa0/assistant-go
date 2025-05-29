@@ -8,7 +8,7 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 
-	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant/internal/config"
 )
 
 // ChainType represents the type of chain

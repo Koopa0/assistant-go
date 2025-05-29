@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant/internal/config"
 )
 
 // Client represents a PostgreSQL client
@@ -48,7 +48,7 @@ func NewClient(ctx context.Context, cfg config.DatabaseConfig) (*Client, error) 
 		}
 	}
 
-	// Create connection pool
+	// Create a connection pool
 	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection pool: %w", err)
@@ -70,10 +70,11 @@ func NewClient(ctx context.Context, cfg config.DatabaseConfig) (*Client, error) 
 }
 
 // Close closes the database connection pool
-func (c *Client) Close() {
+func (c *Client) Close() error {
 	if c.pool != nil {
 		c.pool.Close()
 	}
+	return nil
 }
 
 // Pool returns the underlying connection pool

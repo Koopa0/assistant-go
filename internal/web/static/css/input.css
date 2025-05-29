@@ -1,6 +1,0 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-/* Material Design 3 CSS Custom Properties will be loaded from material-design.css */
-@import url('./material-design.css');

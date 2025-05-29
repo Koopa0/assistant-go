@@ -7,9 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/observability"
-	"github.com/koopa0/assistant-go/internal/ratelimit"
+	"github.com/koopa0/assistant/internal/config"
+	"github.com/koopa0/assistant/internal/observability"
+	"github.com/koopa0/assistant/internal/ratelimit"
 )
 
 // ProviderConstructor is a function that creates a provider instance

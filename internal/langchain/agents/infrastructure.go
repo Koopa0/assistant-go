@@ -9,7 +9,7 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 
-	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant/internal/config"
 )
 
 // InfrastructureAgent specializes in infrastructure management and troubleshooting

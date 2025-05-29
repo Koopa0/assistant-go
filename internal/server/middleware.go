@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/koopa0/assistant-go/internal/observability"
+	"github.com/koopa0/assistant/internal/observability"
 )
 
 // requestIDMiddleware adds a unique request ID to each request

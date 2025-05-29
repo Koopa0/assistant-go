@@ -9,7 +9,7 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 
-	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant/internal/config"
 )
 
 // SequentialChain executes steps in sequence, passing output from one step to the next

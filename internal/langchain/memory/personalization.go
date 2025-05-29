@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant/internal/config"
+	"github.com/koopa0/assistant/internal/storage/postgres"
 )
 
 // PersonalizationMemory implements persistent storage for user preferences and contextual information

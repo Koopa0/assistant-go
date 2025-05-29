@@ -1,27 +1,29 @@
 package cli
 
 import (
-	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
 
-	"github.com/koopa0/assistant-go/internal/assistant"
-	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/observability"
+	"github.com/chzyer/readline"
+	"github.com/koopa0/assistant/internal/assistant"
+	"github.com/koopa0/assistant/internal/cli/ui"
+	"github.com/koopa0/assistant/internal/config"
 )
 
-// CLI represents the command-line interface
+// CLI represents the enhanced command-line interface
 type CLI struct {
 	config    config.CLIConfig
 	assistant *assistant.Assistant
 	logger    *slog.Logger
-	scanner   *bufio.Scanner
+	prompt    *ui.Prompt
+	version   string
 }
 
-// New creates a new CLI instance
+// New creates a new enhanced CLI instance
 func New(cfg config.CLIConfig, assistant *assistant.Assistant, logger *slog.Logger) (*CLI, error) {
 	if assistant == nil {
 		return nil, fmt.Errorf("assistant is required")
@@ -30,269 +32,368 @@ func New(cfg config.CLIConfig, assistant *assistant.Assistant, logger *slog.Logg
 		return nil, fmt.Errorf("logger is required")
 	}
 
+	// Create prompt with auto-completion
+	promptConfig := &ui.PromptConfig{
+		Prompt:       cfg.PromptTemplate,
+		HistoryFile:  cfg.HistoryFile,
+		MaxHistory:   cfg.MaxHistorySize,
+		AutoComplete: createAutoCompleter(),
+		VimMode:      false,
+		MultiLine:    false,
+		PromptColor:  ui.PromptSymbol,
+		InputColor:   ui.UserInput,
+	}
+
+	prompt, err := ui.NewPrompt(promptConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create prompt: %w", err)
+	}
+
 	return &CLI{
 		config:    cfg,
 		assistant: assistant,
-		logger:    observability.CLILogger(logger, "interactive"),
-		scanner:   bufio.NewScanner(os.Stdin),
+		logger:    logger,
+		prompt:    prompt,
+		version:   "0.1.0", // TODO: Get from build flags
 	}, nil
 }
 
-// Run starts the interactive CLI
+// Run starts the interactive CLI session
 func (c *CLI) Run(ctx context.Context) error {
-	c.logger.Info("Starting interactive CLI")
+	// Show welcome screen
+	c.showWelcome()
 
-	// Print welcome message
-	c.printWelcome()
+	// Show help hint
+	ui.Info.Println("Type 'help' for available commands, 'exit' to quit")
+	fmt.Println()
 
-	// Main interaction loop
+	// Main loop
 	for {
-		// Check context cancellation
-		select {
-		case <-ctx.Done():
-			c.logger.Info("CLI interrupted by context cancellation")
-			return ctx.Err()
-		default:
-		}
-
-		// Print prompt
-		c.printPrompt()
-
 		// Read user input
-		if !c.scanner.Scan() {
-			break
+		line, err := c.prompt.ReadLine()
+		if err != nil {
+			if err == readline.ErrInterrupt {
+				if ui.Confirm("Do you want to exit?", false) {
+					break
+				}
+				continue
+			} else if err == io.EOF {
+				break
+			}
+			return fmt.Errorf("failed to read input: %w", err)
 		}
 
-		input := strings.TrimSpace(c.scanner.Text())
-		if input == "" {
+		// Skip empty lines
+		if line == "" {
 			continue
 		}
 
 		// Handle special commands
-		if c.handleSpecialCommand(ctx, input) {
+		if c.handleCommand(ctx, line) {
 			continue
 		}
 
-		// Process query with assistant
-		if err := c.processQuery(ctx, input); err != nil {
-			c.printError(fmt.Sprintf("Error: %v", err))
-		}
+		// Process query through assistant
+		c.processQuery(ctx, line)
 	}
 
-	// Check for scanner errors
-	if err := c.scanner.Err(); err != nil {
-		return fmt.Errorf("scanner error: %w", err)
-	}
+	// Show goodbye message
+	c.showGoodbye()
 
-	c.printGoodbye()
 	return nil
 }
 
-// printWelcome prints the welcome message
-func (c *CLI) printWelcome() {
+// showWelcome displays the welcome screen
+func (c *CLI) showWelcome() {
+	// Clear screen (optional)
 	if c.config.EnableColors {
-		fmt.Printf("\033[36m") // Cyan color
-		fmt.Println("╔══════════════════════════════════════════════════════════════╗")
-		fmt.Println("║                        GoAssistant                           ║")
-		fmt.Println("║                AI-powered development assistant              ║")
-		fmt.Println("╚══════════════════════════════════════════════════════════════╝")
-		fmt.Printf("\033[32m") // Green color
-		fmt.Println("\nWelcome! I'm here to help with your development tasks.")
-		fmt.Println("Type 'help' for available commands or 'exit' to quit.")
-		fmt.Printf("\033[0m") // Reset color
-	} else {
-		fmt.Println("GoAssistant - AI-powered development assistant")
-		fmt.Println("Welcome! I'm here to help with your development tasks.")
-		fmt.Println("Type 'help' for available commands or 'exit' to quit.")
+		fmt.Print("\033[H\033[2J")
 	}
+
+	// Show logo
+	fmt.Println(ui.ColoredLogo())
+
+	// Show welcome message
+	fmt.Println(ui.WelcomeMessage(c.version))
+
+	// Show divider
+	fmt.Println(ui.Divider())
 	fmt.Println()
 }
 
-// printPrompt prints the command prompt
-func (c *CLI) printPrompt() {
-	if c.config.EnableColors {
-		fmt.Printf("\033[34m%s\033[0m", c.config.PromptTemplate)
-	} else {
-		fmt.Print(c.config.PromptTemplate)
-	}
+// showGoodbye displays the goodbye message
+func (c *CLI) showGoodbye() {
+	fmt.Println()
+	fmt.Println(ui.Divider())
+	ui.Success.Println("Thank you for using Assistant!")
+	ui.Muted.Println("Goodbye! 👋")
 }
 
-// printGoodbye prints the goodbye message
-func (c *CLI) printGoodbye() {
-	if c.config.EnableColors {
-		fmt.Printf("\033[32m")
-		fmt.Println("\nGoodbye! Thanks for using GoAssistant.")
-		fmt.Printf("\033[0m")
-	} else {
-		fmt.Println("\nGoodbye! Thanks for using GoAssistant.")
+// handleCommand handles special CLI commands
+func (c *CLI) handleCommand(ctx context.Context, input string) bool {
+	parts := strings.Fields(input)
+	if len(parts) == 0 {
+		return false
 	}
-}
 
-// printError prints an error message
-func (c *CLI) printError(message string) {
-	if c.config.EnableColors {
-		fmt.Printf("\033[31m%s\033[0m\n", message)
-	} else {
-		fmt.Println(message)
-	}
-}
+	command := strings.ToLower(parts[0])
+	args := parts[1:]
 
-// printSuccess prints a success message
-func (c *CLI) printSuccess(message string) {
-	if c.config.EnableColors {
-		fmt.Printf("\033[32m%s\033[0m\n", message)
-	} else {
-		fmt.Println(message)
-	}
-}
-
-// printInfo prints an info message
-func (c *CLI) printInfo(message string) {
-	if c.config.EnableColors {
-		fmt.Printf("\033[36m%s\033[0m\n", message)
-	} else {
-		fmt.Println(message)
-	}
-}
-
-// handleSpecialCommand handles special CLI commands
-func (c *CLI) handleSpecialCommand(ctx context.Context, input string) bool {
-	switch strings.ToLower(input) {
-	case "exit", "quit", "q":
-		return true // This will break the main loop
-
-	case "help", "h":
-		c.printHelp()
+	switch command {
+	case "help", "?":
+		c.showHelp()
 		return true
 
+	case "exit", "quit", "bye":
+		c.prompt.Close()
+		c.showGoodbye()
+		os.Exit(0)
+
 	case "clear", "cls":
-		c.clearScreen()
+		fmt.Print("\033[H\033[2J")
 		return true
 
 	case "status":
-		c.printStatus(ctx)
+		c.showStatus(ctx)
 		return true
 
 	case "tools":
-		c.printTools()
+		c.showTools()
 		return true
 
-	case "health":
-		c.printHealth(ctx)
+	case "history":
+		c.showHistory()
 		return true
 
-	case "version":
-		c.printVersion()
-		return true
-
-	default:
-		return false
-	}
-}
-
-// printHelp prints the help message
-func (c *CLI) printHelp() {
-	c.printInfo("Available commands:")
-	fmt.Println("  help, h      - Show this help message")
-	fmt.Println("  status       - Show assistant status")
-	fmt.Println("  tools        - List available tools")
-	fmt.Println("  health       - Check system health")
-	fmt.Println("  version      - Show version information")
-	fmt.Println("  clear, cls   - Clear the screen")
-	fmt.Println("  exit, quit   - Exit the assistant")
-	fmt.Println()
-	fmt.Println("You can also ask any question or request assistance with development tasks.")
-	fmt.Println()
-}
-
-// clearScreen clears the terminal screen
-func (c *CLI) clearScreen() {
-	fmt.Print("\033[2J\033[H")
-}
-
-// printStatus prints the assistant status
-func (c *CLI) printStatus(ctx context.Context) {
-	stats, err := c.assistant.Stats(ctx)
-	if err != nil {
-		c.printError(fmt.Sprintf("Failed to get status: %v", err))
-		return
-	}
-
-	c.printInfo("Assistant Status:")
-	fmt.Printf("  Database connections: %v\n", stats["database"])
-	fmt.Printf("  Available tools: %v\n", stats["tools"])
-	fmt.Printf("  Processor stats: %v\n", stats["processor"])
-	fmt.Println()
-}
-
-// printTools prints the available tools
-func (c *CLI) printTools() {
-	tools := c.assistant.GetAvailableTools()
-
-	c.printInfo(fmt.Sprintf("Available Tools (%d):", len(tools)))
-	if len(tools) == 0 {
-		fmt.Println("  No tools currently available")
-	} else {
-		for _, tool := range tools {
-			status := "enabled"
-			if !tool.IsEnabled {
-				status = "disabled"
-			}
-			fmt.Printf("  %-15s - %s (%s)\n", tool.Name, tool.Description, status)
+	case "theme":
+		if len(args) > 0 {
+			c.setTheme(args[0])
+		} else {
+			ui.Warning.Println("Usage: theme <dark|light>")
 		}
+		return true
+
+	case "sql", "postgres", "mysql":
+		if len(args) > 0 {
+			c.handleSQLCommand(ctx, strings.Join(args, " "))
+		} else {
+			ui.Warning.Println("Usage: sql <query>")
+		}
+		return true
+
+	case "k8s", "kubectl":
+		if len(args) > 0 {
+			c.handleK8sCommand(ctx, args)
+		} else {
+			ui.Warning.Println("Usage: k8s <command> [args...]")
+		}
+		return true
+
+	case "docker":
+		if len(args) > 0 {
+			c.handleDockerCommand(ctx, args)
+		} else {
+			ui.Warning.Println("Usage: docker <command> [args...]")
+		}
+		return true
 	}
-	fmt.Println()
+
+	return false
 }
 
-// printHealth prints the system health status
-func (c *CLI) printHealth(ctx context.Context) {
-	if err := c.assistant.Health(ctx); err != nil {
-		c.printError(fmt.Sprintf("Health check failed: %v", err))
-		return
-	}
-
-	c.printSuccess("System is healthy ✓")
-	fmt.Println()
-}
-
-// printVersion prints version information
-func (c *CLI) printVersion() {
-	c.printInfo("GoAssistant v0.1.0")
-	fmt.Println("  Built with Go 1.24+")
-	fmt.Println("  Architecture: Modular monolith")
-	fmt.Println("  Database: PostgreSQL with pgvector")
-	fmt.Println()
-}
-
-// processQuery processes a user query
-func (c *CLI) processQuery(ctx context.Context, query string) error {
-	c.logger.Debug("Processing query", slog.String("query", query))
-
-	// Show processing indicator
-	if c.config.EnableColors {
-		fmt.Printf("\033[33mProcessing...\033[0m\n")
-	} else {
-		fmt.Println("Processing...")
-	}
+// processQuery processes a regular query through the assistant
+func (c *CLI) processQuery(ctx context.Context, query string) {
+	// Show progress indicator
+	stop := ui.ShowProgress("Processing query...")
 
 	// Process the query
 	response, err := c.assistant.ProcessQuery(ctx, query)
+	stop()
+
 	if err != nil {
-		return err
+		ui.Error.Printf("Error: %v\n", err)
+		return
 	}
 
-	// Print the response
+	// Display response with formatting
 	fmt.Println()
-	if c.config.EnableColors {
-		fmt.Printf("\033[32m")
-		fmt.Println("Assistant:")
-		fmt.Printf("\033[0m")
-	} else {
-		fmt.Println("Assistant:")
+	ui.Header.Println("Assistant Response:")
+	fmt.Println(ui.Divider())
+
+	// Format and display the response
+	fmt.Println(c.formatResponse(response))
+
+	fmt.Println()
+}
+
+// formatResponse formats the assistant response
+func (c *CLI) formatResponse(response string) string {
+	// TODO: Add markdown parsing and syntax highlighting
+	// For now, just wrap long lines
+	lines := strings.Split(response, "\n")
+	var formatted []string
+
+	for _, line := range lines {
+		if len(line) > 80 {
+			wrapped := ui.WrapText(line, 80)
+			formatted = append(formatted, wrapped...)
+		} else {
+			formatted = append(formatted, line)
+		}
 	}
 
-	fmt.Println(response)
-	fmt.Println()
+	return strings.Join(formatted, "\n")
+}
 
+// showHelp displays help information
+func (c *CLI) showHelp() {
+	fmt.Println()
+	ui.Header.Println("Available Commands:")
+	fmt.Println(ui.Divider())
+
+	commands := []struct {
+		cmd  string
+		desc string
+	}{
+		{"help, ?", "Show this help message"},
+		{"exit, quit", "Exit the assistant"},
+		{"clear, cls", "Clear the screen"},
+		{"status", "Show system status"},
+		{"tools", "List available tools"},
+		{"history", "Show command history"},
+		{"theme <dark|light>", "Change color theme"},
+		{"sql <query>", "Execute SQL query"},
+		{"k8s <command>", "Execute Kubernetes command"},
+		{"docker <command>", "Execute Docker command"},
+	}
+
+	for _, cmd := range commands {
+		ui.Label.Printf("  %-20s", cmd.cmd)
+		ui.Muted.Println(cmd.desc)
+	}
+
+	fmt.Println()
+	ui.Info.Println("Or just type your question and press Enter!")
+	fmt.Println()
+}
+
+// showStatus displays system status
+func (c *CLI) showStatus(ctx context.Context) {
+	fmt.Println()
+	ui.Header.Println("System Status:")
+	fmt.Println(ui.Divider())
+
+	// Get assistant stats
+	stats, err := c.assistant.Stats(ctx)
+	if err != nil {
+		ui.Error.Printf("Failed to get stats: %v\n", err)
+		return
+	}
+
+	// Display stats
+	data := make(map[string]string)
+
+	// Database stats
+	if dbStats, ok := stats["database"].(map[string]interface{}); ok {
+		data["Database Connections"] = fmt.Sprintf("%v", dbStats["total_connections"])
+		data["Active Connections"] = fmt.Sprintf("%v", dbStats["acquired_connections"])
+	}
+
+	// Tool stats
+	if toolStats, ok := stats["tools"].(map[string]interface{}); ok {
+		data["Available Tools"] = fmt.Sprintf("%v", toolStats["count"])
+	}
+
+	ui.RenderKeyValueTable("", data)
+	fmt.Println()
+}
+
+// showTools displays available tools
+func (c *CLI) showTools() {
+	fmt.Println()
+	ui.Header.Println("Available Tools:")
+	fmt.Println(ui.Divider())
+
+	tools := c.assistant.GetAvailableTools()
+
+	if len(tools) == 0 {
+		ui.Warning.Println("No tools available")
+		return
+	}
+
+	headers := []string{"Name", "Category", "Description", "Version"}
+	var rows [][]string
+
+	for _, tool := range tools {
+		rows = append(rows, []string{
+			tool.Name,
+			tool.Category,
+			ui.TruncateString(tool.Description, 40),
+			tool.Version,
+		})
+	}
+
+	opts := ui.DefaultTableOptions()
+	opts.Headers = headers
+	opts.Rows = rows
+	ui.RenderTable(opts)
+
+	fmt.Println()
+}
+
+// showHistory displays command history
+func (c *CLI) showHistory() {
+	// TODO: Implement history display
+	ui.Info.Println("Command history (last 10 commands):")
+	ui.Warning.Println("History display not yet implemented")
+}
+
+// setTheme changes the color theme
+func (c *CLI) setTheme(theme string) {
+	switch theme {
+	case "dark":
+		ui.Success.Println("Switched to dark theme")
+	case "light":
+		ui.Success.Println("Switched to light theme")
+	default:
+		ui.Error.Printf("Unknown theme: %s\n", theme)
+	}
+}
+
+// createAutoCompleter creates the auto-completer for the prompt
+func createAutoCompleter() readline.AutoCompleter {
+	return readline.NewPrefixCompleter(
+		readline.PcItem("help"),
+		readline.PcItem("exit"),
+		readline.PcItem("quit"),
+		readline.PcItem("clear"),
+		readline.PcItem("status"),
+		readline.PcItem("tools"),
+		readline.PcItem("history"),
+		readline.PcItem("theme",
+			readline.PcItem("dark"),
+			readline.PcItem("light"),
+		),
+		readline.PcItem("sql"),
+		readline.PcItem("k8s",
+			readline.PcItem("get"),
+			readline.PcItem("describe"),
+			readline.PcItem("logs"),
+			readline.PcItem("exec"),
+		),
+		readline.PcItem("docker",
+			readline.PcItem("ps"),
+			readline.PcItem("images"),
+			readline.PcItem("logs"),
+			readline.PcItem("exec"),
+		),
+	)
+}
+
+// Close closes the CLI
+func (c *CLI) Close() error {
+	if c.prompt != nil {
+		return c.prompt.Close()
+	}
 	return nil
 }

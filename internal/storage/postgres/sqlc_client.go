@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/koopa0/assistant-go/internal/storage/postgres/sqlc"
+	"github.com/koopa0/assistant/internal/storage/postgres/sqlc"
 )
 
 // SQLCClient wraps the sqlc-generated queries with our domain types

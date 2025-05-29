@@ -8,7 +8,7 @@ import (
 
 	"github.com/tmc/langchaingo/tools"
 
-	internaltools "github.com/koopa0/assistant-go/internal/tools"
+	internaltools "github.com/koopa0/assistant/internal/tools"
 )
 
 // LangChainToolAdapter adapts internal tools to LangChain's tool interface

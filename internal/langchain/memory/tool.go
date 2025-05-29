@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant/internal/config"
 )
 
 // ToolMemory implements caching for tool execution results to optimize performance

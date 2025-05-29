@@ -10,16 +10,16 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	"github.com/koopa0/assistant-go/internal/assistant"
-	"github.com/koopa0/assistant-go/internal/cli"
-	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/observability"
-	"github.com/koopa0/assistant-go/internal/server"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant/internal/assistant"
+	"github.com/koopa0/assistant/internal/cli"
+	"github.com/koopa0/assistant/internal/config"
+	"github.com/koopa0/assistant/internal/observability"
+	"github.com/koopa0/assistant/internal/server"
+	"github.com/koopa0/assistant/internal/storage/postgres"
 )
 
 const (
-	appName    = "GoAssistant"
+	appName    = "Assistant"
 	appVersion = "0.1.0"
 )
 
@@ -70,22 +70,31 @@ func main() {
 	logger := observability.SetupLogging(cfg.LogLevel, cfg.LogFormat)
 	slog.SetDefault(logger)
 
-	logger.Info("Starting GoAssistant",
+	logger.Info("Starting Assistant",
 		slog.String("version", appVersion),
 		slog.String("mode", cfg.Mode))
 
 	// Initialize database connection
-	db, err := postgres.NewClient(ctx, cfg.Database)
-	if err != nil {
-		logger.Error("Failed to initialize database", slog.Any("error", err))
-		os.Exit(1)
-	}
-	defer db.Close()
+	var db postgres.ClientInterface
 
-	// Run database migrations
-	if err := db.Migrate(ctx); err != nil {
-		logger.Error("Failed to run database migrations", slog.Any("error", err))
-		os.Exit(1)
+	// Check if we're in test/demo mode
+	if os.Getenv("ASSISTANT_DEMO_MODE") == "true" || cfg.Database.URL == "" {
+		logger.Info("Running in demo mode without database")
+		db = postgres.NewMockClient(logger)
+	} else {
+		client, err := postgres.NewClient(ctx, cfg.Database)
+		if err != nil {
+			logger.Error("Failed to initialize database", slog.Any("error", err))
+			os.Exit(1)
+		}
+		db = client
+		defer client.Close()
+
+		// Run database migrations
+		if err := client.Migrate(ctx); err != nil {
+			logger.Error("Failed to run database migrations", slog.Any("error", err))
+			os.Exit(1)
+		}
 	}
 
 	// Initialize assistant core
@@ -184,17 +193,17 @@ Usage:
   %s [command] [arguments]
 
 Commands:
-  serve, server, web    Start web server (default)
+  serve, server         Start API server (default)
   cli, interactive      Start interactive CLI mode
   ask <question>        Ask a direct question
   version              Show version information
   help                 Show this help message
 
 Examples:
-  %s serve                           # Start web server
+  %s serve                           # Start API server
   %s cli                             # Start interactive CLI
   %s ask "Explain Go's memory model" # Ask direct question
 
-For more information, visit: https://github.com/koopa0/assistant-go
+For more information, visit: https://github.com/koopa0/assistant
 `, appName, appVersion, os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 }

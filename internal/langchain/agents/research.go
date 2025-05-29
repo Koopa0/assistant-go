@@ -9,7 +9,7 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 
-	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant/internal/config"
 )
 
 // ResearchAgent specializes in information gathering, fact-checking, and report generation

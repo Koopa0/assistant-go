@@ -12,8 +12,8 @@ import (
 	"github.com/tmc/langchaingo/schema"
 	"github.com/tmc/langchaingo/vectorstores"
 
-	"github.com/koopa0/assistant-go/internal/config"
-	//"github.com/koopa0/assistant-go/internal/langchain/documentloader" // Used via embedded RAGChain.docProcessor
+	"github.com/koopa0/assistant/internal/config"
+	//"github.com/koopa0/assistant/internal/langchain/documentloader" // Used via embedded RAGChain.docProcessor
 )
 
 // EnhancedRAGChain provides advanced RAG capabilities with document processing

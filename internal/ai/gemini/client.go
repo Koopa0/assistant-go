@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/koopa0/assistant-go/internal/observability"
+	"github.com/koopa0/assistant/internal/observability"
 )
 
 // Local type definitions to avoid circular imports

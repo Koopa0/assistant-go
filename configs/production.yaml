@@ -1,4 +1,4 @@
-# GoAssistant Production Configuration
+# Assistant Production Configuration
 mode: production
 log_level: info
 log_format: json
@@ -28,7 +28,7 @@ cli:
   history_file: ".goassistant_history"
   max_history_size: 1000
   enable_colors: true
-  prompt_template: "GoAssistant> "
+  prompt_template: "Assistant> "
 
 ai:
   default_provider: "claude"

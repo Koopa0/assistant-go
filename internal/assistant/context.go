@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant/internal/storage/postgres"
 )
 
 // Conversation represents a conversation
@@ -38,12 +38,12 @@ type Message struct {
 
 // ContextManager manages conversation context and history
 type ContextManager struct {
-	db     *postgres.Client
+	db     postgres.ClientInterface
 	logger *slog.Logger
 }
 
 // NewContextManager creates a new context manager
-func NewContextManager(db *postgres.Client, logger *slog.Logger) (*ContextManager, error) {
+func NewContextManager(db postgres.ClientInterface, logger *slog.Logger) (*ContextManager, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database client is required")
 	}

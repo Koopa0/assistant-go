@@ -6,16 +6,16 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/koopa0/assistant-go/internal/ai"
-	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
-	"github.com/koopa0/assistant-go/internal/tools"
+	"github.com/koopa0/assistant/internal/ai"
+	"github.com/koopa0/assistant/internal/config"
+	"github.com/koopa0/assistant/internal/storage/postgres"
+	"github.com/koopa0/assistant/internal/tools"
 )
 
 // Processor handles request processing pipeline
 type Processor struct {
 	config    *config.Config
-	db        *postgres.Client
+	db        postgres.ClientInterface
 	registry  *tools.Registry
 	logger    *slog.Logger
 	context   *ContextManager
@@ -23,7 +23,7 @@ type Processor struct {
 }
 
 // NewProcessor creates a new processor
-func NewProcessor(cfg *config.Config, db *postgres.Client, registry *tools.Registry, logger *slog.Logger) (*Processor, error) {
+func NewProcessor(cfg *config.Config, db postgres.ClientInterface, registry *tools.Registry, logger *slog.Logger) (*Processor, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -625,8 +625,8 @@ func (p *Processor) getTemperature(provider string, request *QueryRequest) float
 
 // getSystemPrompt returns the system prompt for the provider
 func (p *Processor) getSystemPrompt(provider string) string {
-	// Default system prompt for GoAssistant
-	return `You are GoAssistant, an AI-powered development assistant designed to help developers with their coding tasks, infrastructure management, and development workflows.
+	// Default system prompt for Assistant
+	return `You are Assistant, an AI-powered development assistant designed to help developers with their coding tasks, infrastructure management, and development workflows.
 
 You have access to various tools and can help with:
 - Go programming and best practices

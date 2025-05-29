@@ -1,4 +1,4 @@
-# GoAssistant Development Configuration
+# Assistant Development Configuration
 mode: development
 log_level: debug
 log_format: text
@@ -27,7 +27,7 @@ cli:
   history_file: ".goassistant_history_dev"
   max_history_size: 1000
   enable_colors: true
-  prompt_template: "GoAssistant[dev]> "
+  prompt_template: "Assistant[dev]> "
 
 ai:
   default_provider: "claude"

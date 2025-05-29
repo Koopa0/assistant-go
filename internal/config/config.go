@@ -29,7 +29,7 @@ type DatabaseConfig struct {
 	EnableLogging  bool          `yaml:"enable_logging" env:"DB_ENABLE_LOGGING" default:"false"`
 }
 
-// ServerConfig holds HTTP server configuration
+// ServerConfig holds HTTP API server configuration
 type ServerConfig struct {
 	Address         string        `yaml:"address" env:"SERVER_ADDRESS" default:":8080"`
 	ReadTimeout     time.Duration `yaml:"read_timeout" env:"SERVER_READ_TIMEOUT" default:"10s"`
@@ -39,16 +39,14 @@ type ServerConfig struct {
 	EnableTLS       bool          `yaml:"enable_tls" env:"SERVER_ENABLE_TLS" default:"false"`
 	TLSCertFile     string        `yaml:"tls_cert_file" env:"SERVER_TLS_CERT_FILE"`
 	TLSKeyFile      string        `yaml:"tls_key_file" env:"SERVER_TLS_KEY_FILE"`
-	StaticDir       string        `yaml:"static_dir" env:"SERVER_STATIC_DIR" default:"internal/web/static"`
-	TemplatesDir    string        `yaml:"templates_dir" env:"SERVER_TEMPLATES_DIR" default:"internal/web/templates"`
 }
 
 // CLIConfig holds CLI-specific configuration
 type CLIConfig struct {
-	HistoryFile    string `yaml:"history_file" env:"CLI_HISTORY_FILE" default:".goassistant_history"`
+	HistoryFile    string `yaml:"history_file" env:"CLI_HISTORY_FILE" default:".assistant_history"`
 	MaxHistorySize int    `yaml:"max_history_size" env:"CLI_MAX_HISTORY_SIZE" default:"1000"`
 	EnableColors   bool   `yaml:"enable_colors" env:"CLI_ENABLE_COLORS" default:"true"`
-	PromptTemplate string `yaml:"prompt_template" env:"CLI_PROMPT_TEMPLATE" default:"GoAssistant> "`
+	PromptTemplate string `yaml:"prompt_template" env:"CLI_PROMPT_TEMPLATE" default:"Assistant> "`
 }
 
 // AIConfig holds AI provider configuration

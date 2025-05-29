@@ -6,15 +6,15 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
-	"github.com/koopa0/assistant-go/internal/tools"
+	"github.com/koopa0/assistant/internal/config"
+	"github.com/koopa0/assistant/internal/storage/postgres"
+	"github.com/koopa0/assistant/internal/tools"
 )
 
 // Assistant represents the core assistant interface
 type Assistant struct {
 	config    *config.Config
-	db        *postgres.Client
+	db        postgres.ClientInterface
 	logger    *slog.Logger
 	registry  *tools.Registry
 	processor *Processor
@@ -50,7 +50,7 @@ type QueryResponse struct {
 }
 
 // New creates a new Assistant instance
-func New(ctx context.Context, cfg *config.Config, db *postgres.Client, logger *slog.Logger) (*Assistant, error) {
+func New(ctx context.Context, cfg *config.Config, db postgres.ClientInterface, logger *slog.Logger) (*Assistant, error) {
 	if cfg == nil {
 		return nil, NewConfigurationError("config", fmt.Errorf("config is required"))
 	}
@@ -240,11 +240,22 @@ func (a *Assistant) Stats(ctx context.Context) (map[string]interface{}, error) {
 
 	// Database stats
 	dbStats := a.db.Stats()
-	stats["database"] = map[string]interface{}{
-		"total_connections":        dbStats.TotalConns(),
-		"idle_connections":         dbStats.IdleConns(),
-		"acquired_connections":     dbStats.AcquiredConns(),
-		"constructing_connections": dbStats.ConstructingConns(),
+	if dbStats != nil {
+		// Only access stats if we have a real database connection
+		stats["database"] = map[string]interface{}{
+			"total_connections":        dbStats.TotalConns(),
+			"idle_connections":         dbStats.IdleConns(),
+			"acquired_connections":     dbStats.AcquiredConns(),
+			"constructing_connections": dbStats.ConstructingConns(),
+		}
+	} else {
+		// Demo mode - return mock stats
+		stats["database"] = map[string]interface{}{
+			"status":               "demo_mode",
+			"total_connections":    0,
+			"idle_connections":     0,
+			"acquired_connections": 0,
+		}
 	}
 
 	// Tool registry stats

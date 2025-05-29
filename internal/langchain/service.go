@@ -8,11 +8,11 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 
-	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/langchain/agents"
-	"github.com/koopa0/assistant-go/internal/langchain/chains"
-	"github.com/koopa0/assistant-go/internal/langchain/memory"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant/internal/config"
+	"github.com/koopa0/assistant/internal/langchain/agents"
+	"github.com/koopa0/assistant/internal/langchain/chains"
+	"github.com/koopa0/assistant/internal/langchain/memory"
+	"github.com/koopa0/assistant/internal/storage/postgres"
 )
 
 // Service represents the main LangChain service that integrates all components
@@ -120,7 +120,7 @@ func (s *Service) ExecuteAgent(ctx context.Context, agentType agents.AgentType, 
 	s.logger.Info("Executing agent",
 		slog.String("agent_type", string(agentType)),
 		slog.String("user_id", request.UserID),
-		slog.String("query", request.Query))
+		slog.String("query", request.AgentRequest.Query))
 
 	// Execute the appropriate agent
 	var response *agents.AgentResponse
@@ -171,7 +171,7 @@ func (s *Service) ExecuteAgent(ctx context.Context, agentType agents.AgentType, 
 		execution := &postgres.AgentExecutionDomain{
 			AgentType:       string(agentType),
 			UserID:          request.UserID,
-			Query:           request.Query,
+			Query:           request.AgentRequest.Query,
 			Response:        response.Result, // AgentResponse uses Result, not Response
 			Steps:           stepsInterface,
 			ExecutionTimeMs: int(executionTime.Milliseconds()),
@@ -212,7 +212,7 @@ func (s *Service) ExecuteChain(ctx context.Context, chainType chains.ChainType, 
 	s.logger.Info("Executing chain",
 		slog.String("chain_type", string(chainType)),
 		slog.String("user_id", request.UserID),
-		slog.String("input", request.Input))
+		slog.String("input", request.ChainRequest.Input))
 
 	// Execute the chain
 	response, err := s.chainManager.ExecuteChain(ctx, chainType, request.ChainRequest)
@@ -237,7 +237,7 @@ func (s *Service) ExecuteChain(ctx context.Context, chainType chains.ChainType, 
 		execution := &postgres.ChainExecutionDomain{
 			ChainType:       string(chainType),
 			UserID:          request.UserID,
-			Input:           request.Input,
+			Input:           request.ChainRequest.Input,
 			Output:          response.Output,
 			Steps:           stepsInterface,
 			ExecutionTimeMs: int(executionTime.Milliseconds()),

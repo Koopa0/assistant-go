@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/koopa0/assistant-go/internal/ai"
-	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/observability"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant/internal/ai"
+	"github.com/koopa0/assistant/internal/config"
+	"github.com/koopa0/assistant/internal/observability"
+	"github.com/koopa0/assistant/internal/storage/postgres"
 )
 
 // Service provides embedding generation and storage capabilities

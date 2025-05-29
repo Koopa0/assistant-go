@@ -6,10 +6,10 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 
-	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/langchain/agents"
-	"github.com/koopa0/assistant-go/internal/langchain/chains"
-	"github.com/koopa0/assistant-go/internal/testutil"
+	"github.com/koopa0/assistant/internal/config"
+	"github.com/koopa0/assistant/internal/langchain/agents"
+	"github.com/koopa0/assistant/internal/langchain/chains"
+	"github.com/koopa0/assistant/internal/testutil"
 )
 
 // MockLLM implements a mock LLM for testing
