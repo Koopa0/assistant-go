@@ -12,7 +12,9 @@ import (
 	"github.com/koopa0/assistant-go/internal/storage/postgres"
 )
 
-// Conversation represents a conversation
+// Conversation represents a complete conversation with all its messages
+// and metadata. Conversations provide continuity across multiple interactions
+// and maintain context for better responses.
 type Conversation struct {
 	ID         string                 `json:"id"`
 	UserID     string                 `json:"user_id"`
@@ -25,7 +27,9 @@ type Conversation struct {
 	Messages   []*Message             `json:"messages,omitempty"`
 }
 
-// Message represents a message in a conversation
+// Message represents a single message within a conversation.
+// Messages can be from users or the assistant and include metadata
+// for enhanced context tracking.
 type Message struct {
 	ID             string                 `json:"id"`
 	ConversationID string                 `json:"conversation_id"`
@@ -36,10 +40,17 @@ type Message struct {
 	CreatedAt      time.Time              `json:"created_at"`
 }
 
-// ContextManager manages conversation context and history
+// ContextManager handles all conversation-related operations including:
+// - Creating and managing conversations
+// - Storing and retrieving messages
+// - Maintaining conversation history
+// - Archiving and cleanup operations
+//
+// It provides the persistence layer for maintaining context across
+// multiple interactions with users.
 type ContextManager struct {
-	db     postgres.ClientInterface
-	logger *slog.Logger
+	db     postgres.ClientInterface // Database client for persistence
+	logger *slog.Logger             // Structured logger for debugging
 }
 
 // NewContextManager creates a new context manager
@@ -95,8 +106,13 @@ func (cm *ContextManager) CreateConversation(ctx context.Context, userID, title 
 
 	conversation.Summary = summary
 	if len(metadata) > 0 {
-		// TODO: Unmarshal metadata JSON
-		conversation.Metadata = make(map[string]interface{})
+		// Parse metadata JSON
+		if err := json.Unmarshal(metadata, &conversation.Metadata); err != nil {
+			cm.logger.Warn("Failed to unmarshal conversation metadata",
+				slog.String("conversation_id", conversation.ID),
+				slog.Any("error", err))
+			conversation.Metadata = make(map[string]interface{})
+		}
 	} else {
 		conversation.Metadata = make(map[string]interface{})
 	}
@@ -144,8 +160,13 @@ func (cm *ContextManager) GetConversation(ctx context.Context, conversationID st
 
 	conversation.Summary = summary
 	if len(metadata) > 0 {
-		// TODO: Unmarshal metadata JSON
-		conversation.Metadata = make(map[string]interface{})
+		// Parse metadata JSON
+		if err := json.Unmarshal(metadata, &conversation.Metadata); err != nil {
+			cm.logger.Warn("Failed to unmarshal conversation metadata",
+				slog.String("conversation_id", conversation.ID),
+				slog.Any("error", err))
+			conversation.Metadata = make(map[string]interface{})
+		}
 	} else {
 		conversation.Metadata = make(map[string]interface{})
 	}
@@ -211,8 +232,13 @@ func (cm *ContextManager) ListConversations(ctx context.Context, userID string, 
 
 		conversation.Summary = summary
 		if len(metadata) > 0 {
-			// TODO: Unmarshal metadata JSON
-			conversation.Metadata = make(map[string]interface{})
+			// Parse metadata JSON
+			if err := json.Unmarshal(metadata, &conversation.Metadata); err != nil {
+				cm.logger.Warn("Failed to unmarshal conversation metadata",
+					slog.String("conversation_id", conversation.ID),
+					slog.Any("error", err))
+				conversation.Metadata = make(map[string]interface{})
+			}
 		} else {
 			conversation.Metadata = make(map[string]interface{})
 		}

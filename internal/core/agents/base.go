@@ -10,7 +10,15 @@ import (
 	corecontext "github.com/koopa0/assistant-go/internal/core/context"
 )
 
-// Agent represents an AI agent with specialized capabilities
+// Agent defines the core interface for all intelligent agents in the system.
+// Agents are autonomous entities that can:
+// - Understand and handle requests within their domain
+// - Collaborate with other agents for complex tasks
+// - Learn from feedback and adapt to environments
+// - Manage their own state and resources
+//
+// Each agent specializes in a specific domain (development, database, etc.)
+// and provides capabilities that can be composed for complex workflows.
 type Agent interface {
 	// Core agent interface
 	GetID() string
@@ -43,7 +51,16 @@ type Agent interface {
 	Shutdown(ctx context.Context) error
 }
 
-// BaseAgent provides common functionality for all agents
+// BaseAgent provides the foundational implementation for all specialized agents.
+// It handles common concerns like:
+// - State management with thread-safe operations
+// - Resource allocation and tracking
+// - Memory management across different types
+// - Performance metrics and monitoring
+// - Capability registration and confidence tracking
+//
+// Specialized agents should embed BaseAgent and extend its functionality
+// for domain-specific behaviors.
 type BaseAgent struct {
 	ID           string
 	Name         string
@@ -58,7 +75,8 @@ type BaseAgent struct {
 	mu           sync.RWMutex
 }
 
-// Domain represents the area of expertise for an agent
+// Domain represents the specialized area of expertise for an agent.
+// Domains define the primary focus and capabilities of each agent type.
 type Domain string
 
 const (
@@ -74,7 +92,9 @@ const (
 	DomainOptimization   Domain = "optimization"
 )
 
-// Capability represents a specific capability of an agent
+// Capability represents a specific skill or ability that an agent possesses.
+// Capabilities are tracked with proficiency levels and success rates to
+// enable intelligent task routing and collaboration decisions.
 type Capability struct {
 	Name        string
 	Description string
@@ -242,7 +262,12 @@ const (
 	AccessAdmin   AccessLevel = "admin"
 )
 
-// AgentMemory represents agent's working memory
+// AgentMemory provides multi-layered memory storage for agents, mimicking
+// human cognitive memory systems. It includes:
+// - Working memory for immediate task context
+// - Episodic memory for past experiences
+// - Semantic memory for factual knowledge
+// - Procedural memory for learned procedures
 type AgentMemory struct {
 	WorkingMemory    map[string]interface{}
 	EpisodicMemory   []MemoryEpisode
@@ -565,7 +590,17 @@ type CollaborationConfig struct {
 	TrustThreshold    float64
 }
 
-// NewBaseAgent creates a new base agent
+// NewBaseAgent creates and initializes a new base agent with default settings.
+// It sets up all memory systems, resource tracking, and performance metrics.
+//
+// Parameters:
+//   - id: Unique identifier for the agent
+//   - name: Human-readable name for the agent
+//   - domain: The agent's area of expertise
+//   - logger: Structured logger for agent operations
+//
+// Returns:
+//   - *BaseAgent: Fully initialized base agent ready for specialization
 func NewBaseAgent(id, name string, domain Domain, logger *slog.Logger) *BaseAgent {
 	return &BaseAgent{
 		ID:           id,

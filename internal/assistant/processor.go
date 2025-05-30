@@ -13,7 +13,16 @@ import (
 	"github.com/koopa0/assistant-go/internal/tools"
 )
 
-// Processor handles request processing pipeline
+// Processor handles the request processing pipeline for the Assistant.
+// It orchestrates the flow of user queries through context enrichment,
+// AI processing, tool execution, and response generation.
+//
+// The Processor implements a sophisticated pipeline that:
+// - Validates and enriches requests with contextual information
+// - Manages conversation state and history
+// - Coordinates with AI providers for response generation
+// - Executes tools when requested
+// - Handles errors gracefully with appropriate error types
 type Processor struct {
 	config    *config.Config
 	db        postgres.ClientInterface
@@ -59,7 +68,20 @@ func NewProcessor(cfg *config.Config, db postgres.ClientInterface, registry *too
 	}, nil
 }
 
-// Process processes a query request through the pipeline
+// Process executes the complete request processing pipeline.
+// It performs the following steps:
+// 1. Validates the incoming request
+// 2. Builds enriched context from workspace and memory
+// 3. Gets or creates conversation context
+// 4. Adds user message to conversation
+// 5. Determines AI provider and model
+// 6. Processes with AI using enriched context
+// 7. Adds assistant response to conversation
+// 8. Executes tools if requested
+// 9. Returns structured response with metadata
+//
+// The method ensures proper error handling at each step and maintains
+// conversation state throughout the interaction.
 func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryResponse, error) {
 	if request == nil {
 		return nil, NewInvalidInputError("request is required", nil)
@@ -778,12 +800,18 @@ func (p *Processor) detectWorkspaceContext(ctx context.Context, request *QueryRe
 	workspaceContext := make(map[string]interface{})
 
 	// Default workspace detection - in production this would be more sophisticated
-	workspaceContext["project_type"] = "go_project"
-	workspaceContext["primary_language"] = "go"
-	workspaceContext["project_path"] = "/Users/koopa/go/src/github.com/koopa0/assistant-go"
-	workspaceContext["git_repository"] = "assistant-go"
-	workspaceContext["frameworks"] = []string{"net/http", "pgx", "slog"}
-	workspaceContext["tools_available"] = []string{"go_analyzer", "docker", "kubernetes"}
+	// TODO: Move these to configuration or environment detection
+	const (
+		defaultProjectType = "go_project"
+		defaultLanguage    = "go"
+	)
+
+	workspaceContext["project_type"] = defaultProjectType
+	workspaceContext["primary_language"] = defaultLanguage
+	workspaceContext["project_path"] = "/Users/koopa/go/src/github.com/koopa0/assistant-go" // TODO: Get from environment
+	workspaceContext["git_repository"] = "assistant-go"                                     // TODO: Detect from git
+	workspaceContext["frameworks"] = []string{"net/http", "pgx", "slog"}                    // TODO: Detect from go.mod
+	workspaceContext["tools_available"] = []string{"go_analyzer", "docker", "kubernetes"}   // TODO: Detect available tools
 	workspaceContext["detected_at"] = time.Now()
 
 	// TODO: Implement actual workspace detection:
@@ -801,23 +829,26 @@ func (p *Processor) retrieveMemoryContext(ctx context.Context, request *QueryReq
 	memoryContext := make(map[string]interface{})
 
 	// Default memory context - in production this would query the memory systems
-	memoryContext["working"] = "Implementing context integration for GoAssistant"
-	memoryContext["recent_knowledge"] = []string{
-		"Go code analysis tools implemented",
-		"Context engine architecture defined",
-		"Memory systems designed and documented",
-	}
-	memoryContext["user_preferences"] = map[string]interface{}{
+	// TODO: Integrate with actual memory system once implemented
+	defaultPreferences := map[string]interface{}{
 		"preferred_language":   "go",
 		"code_style":           "standard_library_focused",
 		"documentation":        "comprehensive",
 		"response_language":    "traditional_chinese_or_english",
 		"language_restriction": "never_use_simplified_chinese",
 	}
+
+	memoryContext["working"] = "Implementing context integration for Assistant"
+	memoryContext["recent_knowledge"] = []string{
+		"Go code analysis tools implemented",
+		"Context engine architecture defined",
+		"Memory systems designed and documented",
+	}
+	memoryContext["user_preferences"] = defaultPreferences
 	memoryContext["session_context"] = map[string]interface{}{
-		"previous_queries": 0, // Would be actual count
+		"previous_queries": 0, // TODO: Track actual query count
 		"session_start":    time.Now(),
-		"topics_discussed": []string{},
+		"topics_discussed": []string{}, // TODO: Track discussed topics
 	}
 
 	// TODO: Implement actual memory retrieval:

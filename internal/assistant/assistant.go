@@ -14,45 +14,113 @@ import (
 	"github.com/koopa0/assistant-go/internal/tools/godev"
 )
 
-// Assistant represents the core assistant interface
+// Assistant is the core orchestrator of the intelligent development companion.
+// It coordinates all major subsystems including:
+// - Request processing through the Processor
+// - Tool management via the Registry
+// - Conversation management through ContextManager
+// - Database operations for persistence
+//
+// The Assistant provides a unified interface for:
+// - Processing user queries with context awareness
+// - Managing conversations and message history
+// - Executing tools directly when needed
+// - Health monitoring of all subsystems
+// - Graceful shutdown and resource cleanup
 type Assistant struct {
-	config    *config.Config
-	db        postgres.ClientInterface
-	logger    *slog.Logger
-	registry  *tools.Registry
-	processor *Processor
-	context   *ContextManager
+	config    *config.Config           // Application configuration
+	db        postgres.ClientInterface // Database client for persistence
+	logger    *slog.Logger             // Structured logger
+	registry  *tools.Registry          // Tool registry for available tools
+	processor *Processor               // Request processing pipeline
+	context   *ContextManager          // Conversation context manager
 }
 
-// QueryRequest represents a query request
+// QueryRequest represents a comprehensive query request to the Assistant.
+// It includes the query text and various optional parameters to control
+// the processing behavior.
 type QueryRequest struct {
-	Query          string                 `json:"query"`
-	ConversationID *string                `json:"conversation_id,omitempty"`
-	UserID         *string                `json:"user_id,omitempty"`
-	Context        map[string]interface{} `json:"context,omitempty"`
-	Tools          []string               `json:"tools,omitempty"`
-	Provider       *string                `json:"provider,omitempty"`
-	Model          *string                `json:"model,omitempty"`
-	MaxTokens      int                    `json:"max_tokens,omitempty"`
-	Temperature    float64                `json:"temperature,omitempty"`
-	SystemPrompt   *string                `json:"system_prompt,omitempty"`
+	// Query is the user's input text (required)
+	Query string `json:"query"`
+
+	// ConversationID links this query to an existing conversation
+	ConversationID *string `json:"conversation_id,omitempty"`
+
+	// UserID identifies the user making the request
+	UserID *string `json:"user_id,omitempty"`
+
+	// Context provides additional key-value pairs for request processing
+	Context map[string]interface{} `json:"context,omitempty"`
+
+	// Tools specifies which tools should be available for this request
+	Tools []string `json:"tools,omitempty"`
+
+	// Provider overrides the default AI provider (claude, gemini)
+	Provider *string `json:"provider,omitempty"`
+
+	// Model overrides the default model for the provider
+	Model *string `json:"model,omitempty"`
+
+	// MaxTokens limits the response length (provider-specific defaults apply)
+	MaxTokens int `json:"max_tokens,omitempty"`
+
+	// Temperature controls response randomness (0.0 = deterministic, 1.0 = creative)
+	Temperature float64 `json:"temperature,omitempty"`
+
+	// SystemPrompt overrides the default system prompt
+	SystemPrompt *string `json:"system_prompt,omitempty"`
 }
 
-// QueryResponse represents a query response
+// QueryResponse represents the complete response from processing a query.
+// It includes the generated response text along with comprehensive metadata
+// about the processing pipeline.
 type QueryResponse struct {
-	Response       string                 `json:"response"`
-	ConversationID string                 `json:"conversation_id"`
-	MessageID      string                 `json:"message_id"`
-	Provider       string                 `json:"provider"`
-	Model          string                 `json:"model"`
-	TokensUsed     int                    `json:"tokens_used"`
-	ExecutionTime  time.Duration          `json:"execution_time"`
-	ToolsUsed      []string               `json:"tools_used,omitempty"`
-	Context        map[string]interface{} `json:"context,omitempty"`
-	Error          *string                `json:"error,omitempty"`
+	// Response is the generated text response from the AI
+	Response string `json:"response"`
+
+	// ConversationID identifies the conversation this response belongs to
+	ConversationID string `json:"conversation_id"`
+
+	// MessageID uniquely identifies this specific message
+	MessageID string `json:"message_id"`
+
+	// Provider indicates which AI provider was used (claude, gemini)
+	Provider string `json:"provider"`
+
+	// Model specifies the exact model used for generation
+	Model string `json:"model"`
+
+	// TokensUsed reports the total token consumption
+	TokensUsed int `json:"tokens_used"`
+
+	// ExecutionTime measures the total processing duration
+	ExecutionTime time.Duration `json:"execution_time"`
+
+	// ToolsUsed lists any tools that were executed during processing
+	ToolsUsed []string `json:"tools_used,omitempty"`
+
+	// Context contains additional metadata about the processing
+	Context map[string]interface{} `json:"context,omitempty"`
+
+	// Error contains error message if something went wrong
+	Error *string `json:"error,omitempty"`
 }
 
-// New creates a new Assistant instance
+// New creates and initializes a new Assistant instance.
+// It sets up all required subsystems including:
+// - Tool registry with built-in tools
+// - Context manager for conversation handling
+// - Processor for request pipeline
+//
+// Parameters:
+//   - ctx: Context for initialization (not stored)
+//   - cfg: Application configuration (required)
+//   - db: Database client for persistence (required)
+//   - logger: Structured logger instance (required)
+//
+// Returns:
+//   - *Assistant: Initialized assistant ready for use
+//   - error: Configuration or initialization error
 func New(ctx context.Context, cfg *config.Config, db postgres.ClientInterface, logger *slog.Logger) (*Assistant, error) {
 	if cfg == nil {
 		return nil, NewConfigurationError("config", fmt.Errorf("config is required"))
@@ -100,7 +168,18 @@ func New(ctx context.Context, cfg *config.Config, db postgres.ClientInterface, l
 	return assistant, nil
 }
 
-// ProcessQuery processes a user query and returns a response
+// ProcessQuery is a simplified interface for processing a plain text query.
+// It creates a minimal QueryRequest and returns just the response text.
+//
+// For more control over the processing, use ProcessQueryRequest instead.
+//
+// Parameters:
+//   - ctx: Context for request processing
+//   - query: The user's input text
+//
+// Returns:
+//   - string: The generated response text
+//   - error: Processing error if any
 func (a *Assistant) ProcessQuery(ctx context.Context, query string) (string, error) {
 	request := &QueryRequest{
 		Query: query,
@@ -114,7 +193,23 @@ func (a *Assistant) ProcessQuery(ctx context.Context, query string) (string, err
 	return response.Response, nil
 }
 
-// ProcessQueryRequest processes a structured query request
+// ProcessQueryRequest processes a fully structured query request.
+// This is the main entry point for query processing and provides
+// full control over all processing parameters.
+//
+// The method:
+// 1. Validates the request
+// 2. Delegates to the Processor for pipeline execution
+// 3. Tracks execution time
+// 4. Returns comprehensive response with metadata
+//
+// Parameters:
+//   - ctx: Context for request processing
+//   - request: Structured request with query and options
+//
+// Returns:
+//   - *QueryResponse: Complete response with metadata
+//   - error: Processing error if any
 func (a *Assistant) ProcessQueryRequest(ctx context.Context, request *QueryRequest) (*QueryResponse, error) {
 	if request == nil {
 		return nil, NewInvalidInputError("request is required", nil)
@@ -177,7 +272,16 @@ func (a *Assistant) GetToolInfo(toolName string) (*tools.ToolInfo, error) {
 	return a.registry.GetToolInfo(toolName)
 }
 
-// Health checks the health of the assistant and its dependencies
+// Health performs comprehensive health checks on all subsystems.
+// It verifies:
+// - Database connectivity and operations
+// - Tool registry functionality
+// - Processor pipeline health
+//
+// This method is suitable for use as a health check endpoint.
+//
+// Returns:
+//   - error: nil if all systems are healthy, error with details otherwise
 func (a *Assistant) Health(ctx context.Context) error {
 	// Check database health
 	if err := a.db.Health(ctx); err != nil {
@@ -320,7 +424,21 @@ func (a *Assistant) Stats(ctx context.Context) (map[string]interface{}, error) {
 	return stats, nil
 }
 
-// ExecuteTool executes a tool directly
+// ExecuteTool provides direct access to tool execution without going through
+// the full query processing pipeline. This is useful for:
+// - Testing tools in isolation
+// - Building tool-specific interfaces
+// - Programmatic tool execution
+//
+// Parameters:
+//   - ctx: Context for tool execution
+//   - toolName: Name of the registered tool to execute
+//   - input: Tool-specific input parameters
+//   - config: Tool-specific configuration (nil for defaults)
+//
+// Returns:
+//   - *tools.ToolResult: Tool execution results
+//   - error: Execution error if any
 func (a *Assistant) ExecuteTool(ctx context.Context, toolName string, input map[string]interface{}, config map[string]interface{}) (*tools.ToolResult, error) {
 	a.logger.Info("Executing tool directly",
 		slog.String("tool", toolName),
