@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/chzyer/readline"
-	"github.com/koopa0/assistant/internal/assistant"
-	"github.com/koopa0/assistant/internal/cli/ui"
-	"github.com/koopa0/assistant/internal/config"
+	"github.com/koopa0/assistant-go/internal/assistant"
+	"github.com/koopa0/assistant-go/internal/cli/ui"
+	"github.com/koopa0/assistant-go/internal/config"
 )
 
 // CLI represents the enhanced command-line interface

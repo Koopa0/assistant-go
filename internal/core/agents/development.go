@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	corecontext "github.com/koopa0/assistant/internal/core/context"
+	corecontext "github.com/koopa0/assistant-go/internal/core/context"
 )
 
 // DevelopmentAgent is a specialist agent for software development tasks

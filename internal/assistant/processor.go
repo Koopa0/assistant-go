@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/koopa0/assistant/internal/ai"
-	"github.com/koopa0/assistant/internal/config"
-	"github.com/koopa0/assistant/internal/storage/postgres"
-	"github.com/koopa0/assistant/internal/tools"
+	"github.com/koopa0/assistant-go/internal/ai"
+	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/tools"
 )
 
 // Processor handles request processing pipeline
@@ -667,6 +667,13 @@ You have access to various tools and can help with:
 - Code analysis and optimization
 - Development workflow automation
 
+CRITICAL LANGUAGE REQUIREMENTS:
+- You MUST NEVER use Simplified Chinese (简体中文) in any responses
+- You MUST ONLY respond in Traditional Chinese (繁體中文) or English
+- When the user writes in Traditional Chinese, respond in Traditional Chinese
+- When the user writes in English, respond in English
+- For technical terms and code, prefer English
+
 Always provide helpful, accurate, and actionable responses. When using tools, explain what you're doing and why. If you're unsure about something, ask for clarification rather than making assumptions.
 
 Maintain a professional but friendly tone, and focus on practical solutions that follow best practices.`
@@ -674,56 +681,60 @@ Maintain a professional but friendly tone, and focus on practical solutions that
 
 // getContextAwareSystemPrompt returns a context-aware system prompt
 func (p *Processor) getContextAwareSystemPrompt(provider string, enrichedContext map[string]interface{}) string {
-	basePrompt := p.getSystemPrompt(provider)
+	var builder strings.Builder
+	builder.WriteString(p.getSystemPrompt(provider))
 
 	// Add workspace context if available
 	if workspace, ok := enrichedContext["workspace"]; ok {
 		if workspaceMap, ok := workspace.(map[string]interface{}); ok {
-			workspaceInfo := "\n\n## Current Workspace Context:\n"
+			builder.WriteString("\n\n## Current Workspace Context:\n")
 
 			if projectType, ok := workspaceMap["project_type"]; ok {
-				workspaceInfo += fmt.Sprintf("- Project Type: %v\n", projectType)
+				builder.WriteString(fmt.Sprintf("- Project Type: %v\n", projectType))
 			}
 			if language, ok := workspaceMap["primary_language"]; ok {
-				workspaceInfo += fmt.Sprintf("- Primary Language: %v\n", language)
+				builder.WriteString(fmt.Sprintf("- Primary Language: %v\n", language))
 			}
 			if projectPath, ok := workspaceMap["project_path"]; ok {
-				workspaceInfo += fmt.Sprintf("- Project Path: %v\n", projectPath)
+				builder.WriteString(fmt.Sprintf("- Project Path: %v\n", projectPath))
 			}
 			if gitRepo, ok := workspaceMap["git_repository"]; ok {
-				workspaceInfo += fmt.Sprintf("- Git Repository: %v\n", gitRepo)
+				builder.WriteString(fmt.Sprintf("- Git Repository: %v\n", gitRepo))
 			}
 			if frameworks, ok := workspaceMap["frameworks"]; ok {
-				workspaceInfo += fmt.Sprintf("- Frameworks: %v\n", frameworks)
+				builder.WriteString(fmt.Sprintf("- Frameworks: %v\n", frameworks))
 			}
-
-			basePrompt += workspaceInfo
 		}
 	}
 
 	// Add memory context if available
 	if memory, ok := enrichedContext["memory"]; ok {
 		if memoryMap, ok := memory.(map[string]interface{}); ok {
-			memoryInfo := "\n## Relevant Memory Context:\n"
+			builder.WriteString("\n## Relevant Memory Context:\n")
 
 			if workingMemory, ok := memoryMap["working"]; ok {
-				memoryInfo += fmt.Sprintf("- Current Focus: %v\n", workingMemory)
+				builder.WriteString(fmt.Sprintf("- Current Focus: %v\n", workingMemory))
 			}
 			if recentKnowledge, ok := memoryMap["recent_knowledge"]; ok {
-				memoryInfo += fmt.Sprintf("- Recent Knowledge: %v\n", recentKnowledge)
+				builder.WriteString(fmt.Sprintf("- Recent Knowledge: %v\n", recentKnowledge))
 			}
 			if userPreferences, ok := memoryMap["user_preferences"]; ok {
-				memoryInfo += fmt.Sprintf("- User Preferences: %v\n", userPreferences)
+				builder.WriteString(fmt.Sprintf("- User Preferences: %v\n", userPreferences))
 			}
-
-			basePrompt += memoryInfo
 		}
 	}
 
-	// Add final instruction
-	basePrompt += "\n\nUse this context to provide more relevant and personalized assistance. Reference the workspace details and previous interactions when appropriate."
+	// Add language preference enforcement
+	builder.WriteString("\n\n## IMPORTANT Language Requirements:\n")
+	builder.WriteString("- NEVER use Simplified Chinese (简体中文) in responses\n")
+	builder.WriteString("- ONLY use Traditional Chinese (繁體中文) or English\n")
+	builder.WriteString("- When responding in Chinese, ensure all characters are Traditional Chinese\n")
+	builder.WriteString("- Prefer English for technical terms and code explanations\n")
 
-	return basePrompt
+	// Add final instruction
+	builder.WriteString("\n\nUse this context to provide more relevant and personalized assistance. Reference the workspace details and previous interactions when appropriate.")
+
+	return builder.String()
 }
 
 // buildEnrichedContext builds enriched context from workspace detection and memory
@@ -797,9 +808,11 @@ func (p *Processor) retrieveMemoryContext(ctx context.Context, request *QueryReq
 		"Memory systems designed and documented",
 	}
 	memoryContext["user_preferences"] = map[string]interface{}{
-		"preferred_language": "go",
-		"code_style":         "standard_library_focused",
-		"documentation":      "comprehensive",
+		"preferred_language":   "go",
+		"code_style":           "standard_library_focused",
+		"documentation":        "comprehensive",
+		"response_language":    "traditional_chinese_or_english",
+		"language_restriction": "never_use_simplified_chinese",
 	}
 	memoryContext["session_context"] = map[string]interface{}{
 		"previous_queries": 0, // Would be actual count

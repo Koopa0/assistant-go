@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/koopa0/assistant/internal/cli/ui"
+	"github.com/koopa0/assistant-go/internal/cli/ui"
 )
 
 // handleSQLCommand handles SQL-specific commands

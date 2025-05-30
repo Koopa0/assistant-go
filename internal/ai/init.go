@@ -4,8 +4,8 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/koopa0/assistant/internal/ai/claude"
-	"github.com/koopa0/assistant/internal/ai/gemini"
+	"github.com/koopa0/assistant-go/internal/ai/claude"
+	"github.com/koopa0/assistant-go/internal/ai/gemini"
 )
 
 // claudeAdapter wraps a Claude client to implement the Provider interface

@@ -1,4 +1,4 @@
-module github.com/koopa0/assistant
+module github.com/koopa0/assistant-go
 
 go 1.24.2
 

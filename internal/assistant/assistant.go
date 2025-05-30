@@ -1,3 +1,5 @@
+// Package assistant provides the core assistant functionality for the GoAssistant application.
+// It includes request processing, tool orchestration, and AI provider integration.
 package assistant
 
 import (
@@ -6,10 +8,10 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/koopa0/assistant/internal/config"
-	"github.com/koopa0/assistant/internal/storage/postgres"
-	"github.com/koopa0/assistant/internal/tools"
-	"github.com/koopa0/assistant/internal/tools/godev"
+	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/tools"
+	"github.com/koopa0/assistant-go/internal/tools/godev"
 )
 
 // Assistant represents the core assistant interface
@@ -241,6 +243,34 @@ func (a *Assistant) registerGoTools() error {
 		return godev.NewGoAnalyzer(config, logger)
 	}); err != nil {
 		return fmt.Errorf("failed to register go_analyzer: %w", err)
+	}
+
+	// Register Go Formatter
+	if err := a.registry.Register("go_formatter", func(config map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+		return godev.NewGoFormatter(config, logger)
+	}); err != nil {
+		return fmt.Errorf("failed to register go_formatter: %w", err)
+	}
+
+	// Register Go Tester
+	if err := a.registry.Register("go_tester", func(config map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+		return godev.NewGoTester(config, logger)
+	}); err != nil {
+		return fmt.Errorf("failed to register go_tester: %w", err)
+	}
+
+	// Register Go Builder
+	if err := a.registry.Register("go_builder", func(config map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+		return godev.NewGoBuilder(config, logger)
+	}); err != nil {
+		return fmt.Errorf("failed to register go_builder: %w", err)
+	}
+
+	// Register Go Dependency Analyzer
+	if err := a.registry.Register("go_dependency_analyzer", func(config map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+		return godev.NewGoDependencyAnalyzer(config, logger)
+	}); err != nil {
+		return fmt.Errorf("failed to register go_dependency_analyzer: %w", err)
 	}
 
 	a.logger.Debug("Go development tools registered")

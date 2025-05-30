@@ -1,3 +1,5 @@
+// Package config provides application configuration management with support for
+// environment variables, YAML files, and validation.
 package config
 
 import (

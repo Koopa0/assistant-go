@@ -10,7 +10,7 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 
-	"github.com/koopa0/assistant/internal/config"
+	"github.com/koopa0/assistant-go/internal/config"
 )
 
 // ConditionalChain executes different paths based on conditions and intermediate results

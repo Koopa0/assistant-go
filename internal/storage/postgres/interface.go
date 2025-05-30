@@ -1,3 +1,5 @@
+// Package postgres provides PostgreSQL database client implementation with connection pooling,
+// transaction management, and migration support using pgx driver.
 package postgres
 
 import (

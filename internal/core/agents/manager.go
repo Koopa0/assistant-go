@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	corecontext "github.com/koopa0/assistant/internal/core/context"
+	corecontext "github.com/koopa0/assistant-go/internal/core/context"
 )
 
 // AgentManager orchestrates multiple AI agents

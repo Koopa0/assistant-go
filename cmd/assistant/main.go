@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	"github.com/koopa0/assistant/internal/assistant"
-	"github.com/koopa0/assistant/internal/cli"
-	"github.com/koopa0/assistant/internal/config"
-	"github.com/koopa0/assistant/internal/observability"
-	"github.com/koopa0/assistant/internal/server"
-	"github.com/koopa0/assistant/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/assistant"
+	"github.com/koopa0/assistant-go/internal/cli"
+	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant-go/internal/observability"
+	"github.com/koopa0/assistant-go/internal/server"
+	"github.com/koopa0/assistant-go/internal/storage/postgres"
 )
 
 const (
@@ -66,20 +66,41 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup structured logging
-	logger := observability.SetupLogging(cfg.LogLevel, cfg.LogFormat)
+	// Determine if we're in quiet mode for CLI/ask commands
+	isQuietMode := len(os.Args) > 1 && (os.Args[1] == "cli" || os.Args[1] == "interactive" || os.Args[1] == "ask")
+
+	// Setup structured logging with mode-specific configuration
+	logLevel := cfg.LogLevel
+	var logger *slog.Logger
+	if isQuietMode {
+		// For CLI/ask modes, redirect logs to /dev/null to keep output clean
+		nullFile, err := os.OpenFile("/dev/null", os.O_WRONLY, 0)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to open /dev/null: %v\n", err)
+			os.Exit(1)
+		}
+		defer nullFile.Close()
+		logger = observability.SetupLoggingWithWriter(nullFile, "error", cfg.LogFormat)
+	} else {
+		logger = observability.SetupLogging(logLevel, cfg.LogFormat)
+	}
 	slog.SetDefault(logger)
 
-	logger.Info("Starting Assistant",
-		slog.String("version", appVersion),
-		slog.String("mode", cfg.Mode))
+	// Only log startup info for server mode
+	if !isQuietMode {
+		logger.Info("Starting Assistant",
+			slog.String("version", appVersion),
+			slog.String("mode", cfg.Mode))
+	}
 
 	// Initialize database connection
 	var db postgres.ClientInterface
 
-	// Check if we're in test/demo mode
-	if os.Getenv("ASSISTANT_DEMO_MODE") == "true" || cfg.Database.URL == "" {
-		logger.Info("Running in demo mode without database")
+	// Check if we're in test/demo mode or quiet mode
+	if os.Getenv("ASSISTANT_DEMO_MODE") == "true" || cfg.Database.URL == "" || isQuietMode {
+		if !isQuietMode {
+			logger.Info("Running in demo mode without database")
+		}
 		db = postgres.NewMockClient(logger)
 	} else {
 		client, err := postgres.NewClient(ctx, cfg.Database)

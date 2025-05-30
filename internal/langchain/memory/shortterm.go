@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/koopa0/assistant/internal/config"
+	"github.com/koopa0/assistant-go/internal/config"
 )
 
 // ShortTermMemory implements buffer-based short-term memory storage

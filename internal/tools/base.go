@@ -1,3 +1,5 @@
+// Package tools provides a registry and base implementation for tools that can be
+// executed by the assistant. It includes tool registration, execution, and management.
 package tools
 
 import (
@@ -75,7 +77,8 @@ func (bt *BaseTool) Close(ctx context.Context) error {
 	return nil
 }
 
-// GetConfig returns a configuration value
+// GetConfig returns a configuration value for the given key.
+// It returns the value and a boolean indicating whether the key exists.
 func (bt *BaseTool) GetConfig(key string) (interface{}, bool) {
 	if bt.config == nil {
 		return nil, false
@@ -84,7 +87,8 @@ func (bt *BaseTool) GetConfig(key string) (interface{}, bool) {
 	return value, exists
 }
 
-// GetConfigString returns a string configuration value
+// GetConfigString returns a string configuration value for the given key.
+// It returns the string value and a boolean indicating whether the key exists and is a string.
 func (bt *BaseTool) GetConfigString(key string) (string, bool) {
 	value, exists := bt.GetConfig(key)
 	if !exists {
@@ -94,7 +98,9 @@ func (bt *BaseTool) GetConfigString(key string) (string, bool) {
 	return str, ok
 }
 
-// GetConfigInt returns an int configuration value
+// GetConfigInt returns an int configuration value for the given key.
+// It returns the int value and a boolean indicating whether the key exists and is convertible to int.
+// It supports both int and float64 types from JSON unmarshaling.
 func (bt *BaseTool) GetConfigInt(key string) (int, bool) {
 	value, exists := bt.GetConfig(key)
 	if !exists {
@@ -122,31 +128,31 @@ func (bt *BaseTool) GetConfigBool(key string) (bool, bool) {
 }
 
 // LogInfo logs an info message with tool context
-func (bt *BaseTool) LogInfo(message string, args ...slog.Attr) {
+func (bt *BaseTool) LogInfo(ctx context.Context, message string, args ...slog.Attr) {
 	attrs := append([]slog.Attr{
 		slog.String("tool", bt.name),
 		slog.String("category", bt.category),
 	}, args...)
-	bt.logger.LogAttrs(context.Background(), slog.LevelInfo, message, attrs...)
+	bt.logger.LogAttrs(ctx, slog.LevelInfo, message, attrs...)
 }
 
 // LogError logs an error message with tool context
-func (bt *BaseTool) LogError(message string, err error, args ...slog.Attr) {
+func (bt *BaseTool) LogError(ctx context.Context, message string, err error, args ...slog.Attr) {
 	attrs := append([]slog.Attr{
 		slog.String("tool", bt.name),
 		slog.String("category", bt.category),
 		slog.Any("error", err),
 	}, args...)
-	bt.logger.LogAttrs(context.Background(), slog.LevelError, message, attrs...)
+	bt.logger.LogAttrs(ctx, slog.LevelError, message, attrs...)
 }
 
 // LogDebug logs a debug message with tool context
-func (bt *BaseTool) LogDebug(message string, args ...slog.Attr) {
+func (bt *BaseTool) LogDebug(ctx context.Context, message string, args ...slog.Attr) {
 	attrs := append([]slog.Attr{
 		slog.String("tool", bt.name),
 		slog.String("category", bt.category),
 	}, args...)
-	bt.logger.LogAttrs(context.Background(), slog.LevelDebug, message, attrs...)
+	bt.logger.LogAttrs(ctx, slog.LevelDebug, message, attrs...)
 }
 
 // ValidateInput validates tool input against the parameters schema

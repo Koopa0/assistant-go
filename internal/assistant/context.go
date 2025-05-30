@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/koopa0/assistant/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/storage/postgres"
 )
 
 // Conversation represents a conversation

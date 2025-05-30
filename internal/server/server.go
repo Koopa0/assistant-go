@@ -1,3 +1,5 @@
+// Package server provides HTTP API server implementation with middleware support,
+// request/response handling, and graceful shutdown capabilities.
 package server
 
 import (
@@ -7,18 +9,18 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/koopa0/assistant/internal/assistant"
-	"github.com/koopa0/assistant/internal/config"
-	"github.com/koopa0/assistant/internal/observability"
+	"github.com/koopa0/assistant-go/internal/assistant"
+	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant-go/internal/observability"
 )
 
 // Server represents the HTTP API server
 type Server struct {
-	config    config.ServerConfig
 	assistant *assistant.Assistant
 	logger    *slog.Logger
 	server    *http.Server
 	mux       *http.ServeMux
+	config    config.ServerConfig
 }
 
 // New creates a new HTTP API server

@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/koopa0/assistant/internal/config"
+	"github.com/koopa0/assistant-go/internal/config"
 )
 
 // Client represents a PostgreSQL client

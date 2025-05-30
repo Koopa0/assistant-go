@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/koopa0/assistant/internal/ai"
-	"github.com/koopa0/assistant/internal/config"
+	"github.com/koopa0/assistant-go/internal/ai"
+	"github.com/koopa0/assistant-go/internal/config"
 )
 
 // MockAIManager for embedding tests

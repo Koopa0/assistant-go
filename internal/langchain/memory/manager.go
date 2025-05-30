@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/koopa0/assistant/internal/config"
-	"github.com/koopa0/assistant/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant-go/internal/storage/postgres"
 )
 
 // MemoryType represents different types of memory

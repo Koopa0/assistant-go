@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	corecontext "github.com/koopa0/assistant/internal/core/context"
+	corecontext "github.com/koopa0/assistant-go/internal/core/context"
 )
 
 // Agent represents an AI agent with specialized capabilities

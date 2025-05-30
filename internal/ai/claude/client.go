@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/koopa0/assistant/internal/observability"
+	"github.com/koopa0/assistant-go/internal/observability"
 )
 
 // ProviderConfig represents configuration for an AI provider

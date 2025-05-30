@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/koopa0/assistant/internal/langchain"
-	"github.com/koopa0/assistant/internal/langchain/agents"
-	"github.com/koopa0/assistant/internal/langchain/chains"
-	"github.com/koopa0/assistant/internal/langchain/memory"
+	"github.com/koopa0/assistant-go/internal/langchain"
+	"github.com/koopa0/assistant-go/internal/langchain/agents"
+	"github.com/koopa0/assistant-go/internal/langchain/chains"
+	"github.com/koopa0/assistant-go/internal/langchain/memory"
 )
 
 // JSONResponse implements a JSON encoder for HTTP responses

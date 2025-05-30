@@ -13,10 +13,10 @@ import (
 	"github.com/tmc/langchaingo/schema"
 	"github.com/tmc/langchaingo/vectorstores"
 
-	"github.com/koopa0/assistant/internal/config"
-	"github.com/koopa0/assistant/internal/langchain/documentloader"
-	"github.com/koopa0/assistant/internal/langchain/vectorstore"
-	"github.com/koopa0/assistant/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant-go/internal/langchain/documentloader"
+	"github.com/koopa0/assistant-go/internal/langchain/vectorstore"
+	"github.com/koopa0/assistant-go/internal/storage/postgres"
 )
 
 // RAGChain implements Retrieval-Augmented Generation using LangChain components

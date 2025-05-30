@@ -10,8 +10,8 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 
-	"github.com/koopa0/assistant/internal/config"
-	"github.com/koopa0/assistant/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant-go/internal/storage/postgres"
 )
 
 // DatabaseAgent specializes in database operations and SQL assistance

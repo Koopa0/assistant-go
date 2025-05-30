@@ -8,11 +8,11 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 
-	"github.com/koopa0/assistant/internal/config"
-	"github.com/koopa0/assistant/internal/langchain/agents"
-	"github.com/koopa0/assistant/internal/langchain/chains"
-	"github.com/koopa0/assistant/internal/langchain/memory"
-	"github.com/koopa0/assistant/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant-go/internal/langchain/agents"
+	"github.com/koopa0/assistant-go/internal/langchain/chains"
+	"github.com/koopa0/assistant-go/internal/langchain/memory"
+	"github.com/koopa0/assistant-go/internal/storage/postgres"
 )
 
 // Service represents the main LangChain service that integrates all components

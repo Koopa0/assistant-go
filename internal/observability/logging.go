@@ -43,6 +43,11 @@ const (
 
 // SetupLogging configures and returns a structured logger
 func SetupLogging(level, format string) *slog.Logger {
+	return SetupLoggingWithWriter(os.Stdout, level, format)
+}
+
+// SetupLoggingWithWriter configures and returns a structured logger with custom writer
+func SetupLoggingWithWriter(writer io.Writer, level, format string) *slog.Logger {
 	var logLevel slog.Level
 	switch strings.ToLower(level) {
 	case "debug":
@@ -89,11 +94,11 @@ func SetupLogging(level, format string) *slog.Logger {
 
 	switch strings.ToLower(format) {
 	case "json":
-		handler = slog.NewJSONHandler(os.Stdout, opts)
+		handler = slog.NewJSONHandler(writer, opts)
 	case "text":
-		handler = slog.NewTextHandler(os.Stdout, opts)
+		handler = slog.NewTextHandler(writer, opts)
 	default:
-		handler = slog.NewJSONHandler(os.Stdout, opts)
+		handler = slog.NewJSONHandler(writer, opts)
 	}
 
 	return slog.New(handler)
