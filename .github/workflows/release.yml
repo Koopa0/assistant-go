@@ -37,24 +37,7 @@ jobs:
       - name: Install dependencies
         run: go mod download
 
-      - name: Install templ
-        run: go install github.com/a-h/templ/cmd/templ@latest
-
-      - name: Generate templ files
-        run: templ generate
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install Tailwind CSS
-        run: npm install -g tailwindcss
-
-      - name: Build web assets
-        run: |
-          mkdir -p internal/web/static/css
-          tailwindcss -i internal/web/static/css/material-design.css -o internal/web/static/css/tailwind.css --minify
+      # Web assets not needed for this project
 
       - name: Run tests
         env:

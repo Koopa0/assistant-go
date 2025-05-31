@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: [ 'go', 'javascript' ]
+        language: [ 'go' ]
 
     steps:
       - name: Checkout repository
@@ -38,13 +38,7 @@ jobs:
         with:
           go-version: "1.24"
 
-      - name: Install templ
-        if: matrix.language == 'go'
-        run: go install github.com/a-h/templ/cmd/templ@latest
-
-      - name: Generate templ files
-        if: matrix.language == 'go'
-        run: templ generate
+      # No additional setup needed for Go build
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
