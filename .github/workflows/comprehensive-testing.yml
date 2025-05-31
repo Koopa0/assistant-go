@@ -41,9 +41,11 @@ jobs:
       - name: Install dependencies
         run: |
           go mod download
+          go mod tidy
           go install honnef.co/go/tools/cmd/staticcheck@latest
-          go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
           go install golang.org/x/tools/cmd/goimports@latest
+          # Install gosec using installer to avoid module issues
+          curl -sfL https://raw.githubusercontent.com/securecodewarrior/gosec/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v2.21.4
 
       - name: Format check
         run: |
@@ -72,7 +74,8 @@ jobs:
 
       - name: Install and run golangci-lint
         run: |
-          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.61.0
+          # Use latest version that supports Go 1.24
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin latest
           $(go env GOPATH)/bin/golangci-lint run --timeout=5m --disable=typecheck
 
   # Phase 2: Unit Tests
@@ -100,7 +103,9 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: Install dependencies
-        run: go mod download
+        run: |
+          go mod download
+          go mod tidy
 
       - name: Create coverage directory
         run: mkdir -p coverage

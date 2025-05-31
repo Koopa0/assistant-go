@@ -8,14 +8,10 @@
 run:
   timeout: 5m
   tests: true
-  skip-dirs:
-    - vendor
-    - .git
-    - bin
-    - deployments
 
 output:
-  format: colored-line-number
+  formats:
+    - format: colored-line-number
   print-issued-lines: true
   print-linter-name: true
 
@@ -61,6 +57,11 @@ linters:
     - lll
 
 issues:
+  exclude-dirs:
+    - vendor
+    - .git
+    - bin
+    - deployments
   exclude-rules:
     # Exclude some linters from running on tests files
     - path: _test\.go
