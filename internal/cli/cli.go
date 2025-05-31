@@ -294,14 +294,24 @@ func (c *CLI) showStatus(ctx context.Context) {
 	data := make(map[string]string)
 
 	// Database stats
-	if dbStats, ok := stats["database"].(map[string]interface{}); ok {
-		data["Database Connections"] = fmt.Sprintf("%v", dbStats["total_connections"])
-		data["Active Connections"] = fmt.Sprintf("%v", dbStats["acquired_connections"])
+	if stats.Database != nil {
+		data["Database Status"] = stats.Database.Status
+		data["Database Connections"] = fmt.Sprintf("%d", stats.Database.TotalConns)
+		data["Active Connections"] = fmt.Sprintf("%d", stats.Database.AcquiredConns)
+		data["Idle Connections"] = fmt.Sprintf("%d", stats.Database.IdleConns)
 	}
 
 	// Tool stats
-	if toolStats, ok := stats["tools"].(map[string]interface{}); ok {
-		data["Available Tools"] = fmt.Sprintf("%v", toolStats["count"])
+	if stats.Tools != nil {
+		data["Available Tools"] = fmt.Sprintf("%d", stats.Tools.RegisteredTools)
+	}
+
+	// Processor stats
+	if stats.Processor != nil {
+		data["Requests Processed"] = fmt.Sprintf("%d", stats.Processor.RequestsProcessed)
+		if stats.Processor.AverageProcessingTimeMs > 0 {
+			data["Avg Processing Time"] = fmt.Sprintf("%dms", stats.Processor.AverageProcessingTimeMs)
+		}
 	}
 
 	ui.RenderKeyValueTable("", data)

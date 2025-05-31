@@ -4,6 +4,18 @@ import "time"
 
 // Common types shared across memory subsystems
 
+// ItemType defines types of memory items
+type ItemType string
+
+const (
+	ItemTypeTemporary  ItemType = "temporary"
+	ItemTypeGoal       ItemType = "goal"
+	ItemTypeContext    ItemType = "context"
+	ItemTypeReference  ItemType = "reference"
+	ItemTypeConstraint ItemType = "constraint"
+	ItemTypeResult     ItemType = "result"
+)
+
 // MemoryType defines types of memory for consolidation
 type MemoryType string
 
@@ -46,13 +58,17 @@ const (
 type QueryType string
 
 const (
-	QueryExact       QueryType = "exact"
-	QuerySimilar     QueryType = "similar"
-	QueryRelated     QueryType = "related"
-	QueryTemporal    QueryType = "temporal"
-	QueryContextual  QueryType = "contextual"
-	QueryTypeConcept QueryType = "concept"
-	QueryHowTo       QueryType = "how_to"
+	QueryExact        QueryType = "exact"
+	QuerySimilar      QueryType = "similar"
+	QueryRelated      QueryType = "related"
+	QueryTemporal     QueryType = "temporal"
+	QueryContextual   QueryType = "contextual"
+	QueryTypeConcept  QueryType = "concept"
+	QueryTypeRelation QueryType = "relation"
+	QueryHowTo        QueryType = "how_to"
+	QueryFastest      QueryType = "fastest"
+	QuerySafest       QueryType = "safest"
+	QueryOptimal      QueryType = "optimal"
 )
 
 // ConditionType defines types of conditions

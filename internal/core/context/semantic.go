@@ -181,7 +181,6 @@ type SemanticInfo struct {
 	Confidence  float64
 	Complexity  float64
 	Ambiguity   float64
-	Context     SemanticContext
 	Suggestions []Suggestion
 }
 

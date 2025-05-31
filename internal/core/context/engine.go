@@ -57,8 +57,8 @@ type ContextualRequest struct {
 	Original   Request
 	Workspace  WorkspaceInfo
 	History    TemporalInfo
-	Semantics  SemanticInfo
-	Personal   PersonalInfo
+	Semantics  *SemanticInfo
+	Personal   *PersonalInfo
 	Confidence float64
 }
 
@@ -136,14 +136,14 @@ func (ce *ContextEngine) EnrichRequest(ctx context.Context, request Request) (*C
 	}
 
 	// Calculate overall confidence based on context quality
-	confidence := ce.calculateConfidence(workspaceInfo, historyInfo, semanticInfo, personalInfo)
+	confidence := ce.calculateConfidence(workspaceInfo, historyInfo, &semanticInfo, &personalInfo)
 
 	enriched := &ContextualRequest{
 		Original:   request,
 		Workspace:  workspaceInfo,
 		History:    historyInfo,
-		Semantics:  semanticInfo,
-		Personal:   personalInfo,
+		Semantics:  &semanticInfo,
+		Personal:   &personalInfo,
 		Confidence: confidence,
 	}
 
@@ -210,13 +210,13 @@ func (ce *ContextEngine) GetCurrentContext(ctx context.Context) (*CurrentContext
 		Workspace: workspace,
 		Temporal:  temporal,
 		Semantic:  semantic,
-		Personal:  personal,
+		Personal:  &personal,
 		Timestamp: time.Now(),
 	}, nil
 }
 
 // calculateConfidence calculates overall context confidence
-func (ce *ContextEngine) calculateConfidence(workspace WorkspaceInfo, history TemporalInfo, semantic SemanticInfo, personal PersonalInfo) float64 {
+func (ce *ContextEngine) calculateConfidence(workspace WorkspaceInfo, history TemporalInfo, semantic *SemanticInfo, personal *PersonalInfo) float64 {
 	// Base confidence factors
 	workspaceConfidence := 0.0
 	if workspace.ActiveProject != "" {
@@ -286,6 +286,6 @@ type CurrentContext struct {
 	Workspace WorkspaceState
 	Temporal  TemporalState
 	Semantic  SemanticState
-	Personal  PersonalState
+	Personal  *PersonalState
 	Timestamp time.Time
 }

@@ -306,7 +306,12 @@ func (s *Server) handleExecuteTool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Execute tool through assistant
-	result, err := s.assistant.ExecuteTool(ctx, toolName, request.Input, request.Config)
+	toolReq := &assistant.ToolExecutionRequest{
+		ToolName: toolName,
+		Input:    request.Input,
+		Config:   request.Config,
+	}
+	result, err := s.assistant.ExecuteTool(ctx, toolReq)
 	if err != nil {
 		s.logger.Error("Tool execution failed",
 			slog.String("tool", toolName),

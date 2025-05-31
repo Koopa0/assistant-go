@@ -7,8 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/koopa0/assistant-go/internal/core/agents"
-	corecontext "github.com/koopa0/assistant-go/internal/core/context"
 	"github.com/koopa0/assistant-go/internal/core/events"
 )
 
@@ -50,18 +48,6 @@ type WorkingMemoryItem struct {
 	Associations []string
 	Metadata     map[string]interface{}
 }
-
-// ItemType defines types of working memory items
-type ItemType string
-
-const (
-	ItemTypeGoal       ItemType = "goal"
-	ItemTypeContext    ItemType = "context"
-	ItemTypeConstraint ItemType = "constraint"
-	ItemTypeResult     ItemType = "result"
-	ItemTypeReference  ItemType = "reference"
-	ItemTypeTemporary  ItemType = "temporary"
-)
 
 // TaskContext maintains comprehensive context for active tasks including:
 // - Goal tracking and progress monitoring

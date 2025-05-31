@@ -154,3 +154,13 @@ type SecurityConfig struct {
 	EnableCORS     bool          `yaml:"enable_cors" env:"ENABLE_CORS" default:"true"`
 	AllowedOrigins []string      `yaml:"allowed_origins" env:"ALLOWED_ORIGINS"`
 }
+
+// String returns a string representation of the Config, with sensitive data masked
+func (c *Config) String() string {
+	return "<Config with masked sensitive data>"
+}
+
+// Validate validates the AI configuration
+func (cfg *AIConfig) Validate() error {
+	return validateAI(*cfg)
+}

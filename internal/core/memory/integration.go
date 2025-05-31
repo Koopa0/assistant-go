@@ -402,7 +402,7 @@ type Validator interface {
 
 // UnifiedRetriever provides unified retrieval
 type UnifiedRetriever struct {
-	strategies map[RetrievalMode]RetrievalStrategy
+	strategies map[RetrievalMode]UnifiedRetrievalStrategy
 	aggregator *ResultAggregator
 	ranker     *ResultRanker
 	cache      *RetrievalCache
@@ -418,6 +418,12 @@ const (
 	RetrievalAssociative RetrievalMode = "associative"
 	RetrievalComposite   RetrievalMode = "composite"
 )
+
+// UnifiedRetrievalStrategy defines unified memory retrieval strategies
+type UnifiedRetrievalStrategy interface {
+	Retrieve(query UnifiedQuery, memories map[MemoryType]interface{}) []RetrievalResult
+	GetName() string
+}
 
 // ResultAggregator aggregates retrieval results
 type ResultAggregator struct {
@@ -587,7 +593,7 @@ func NewIntegratedMemory(config IntegratedMemoryConfig) (*IntegratedMemory, erro
 	}
 
 	retriever := &UnifiedRetriever{
-		strategies: make(map[RetrievalMode]RetrievalStrategy),
+		strategies: make(map[RetrievalMode]UnifiedRetrievalStrategy),
 		aggregator: &ResultAggregator{
 			strategies: make(map[AggregationStrategy]AggregationFunc),
 			weights:    make(map[MemoryType]float64),
@@ -1003,7 +1009,7 @@ func (im *IntegratedMemory) queryMemory(ctx context.Context, memType MemoryType,
 
 	case MemoryTypeSemantic:
 		concepts, err := im.semantic.Query(ctx, SemanticQuery{
-			Type:    QueryTypeConcept,
+			Type:    SemanticQueryTypeConcept,
 			Concept: query.Query,
 			Limit:   query.Limit,
 		})
@@ -1017,7 +1023,7 @@ func (im *IntegratedMemory) queryMemory(ctx context.Context, memType MemoryType,
 
 	case MemoryTypeProcedural:
 		procedures, err := im.procedural.Query(ctx, ProceduralQuery{
-			Type:  QueryHowTo,
+			Type:  ProceduralQueryHowTo,
 			Goal:  query.Query,
 			Limit: query.Limit,
 		})
@@ -1357,6 +1363,10 @@ func (s *ExactRetrievalStrategy) Retrieve(query UnifiedQuery, memories map[Memor
 	return []RetrievalResult{}
 }
 
+func (s *ExactRetrievalStrategy) GetName() string {
+	return "exact"
+}
+
 // SimilarityRetrievalStrategy implements similarity-based retrieval
 type SimilarityRetrievalStrategy struct{}
 
@@ -1365,12 +1375,20 @@ func (s *SimilarityRetrievalStrategy) Retrieve(query UnifiedQuery, memories map[
 	return []RetrievalResult{}
 }
 
+func (s *SimilarityRetrievalStrategy) GetName() string {
+	return "similarity"
+}
+
 // AssociativeRetrievalStrategy implements associative retrieval
 type AssociativeRetrievalStrategy struct{}
 
 func (s *AssociativeRetrievalStrategy) Retrieve(query UnifiedQuery, memories map[MemoryType]interface{}) []RetrievalResult {
 	// Implementation for associative retrieval
 	return []RetrievalResult{}
+}
+
+func (s *AssociativeRetrievalStrategy) GetName() string {
+	return "associative"
 }
 
 // Router methods

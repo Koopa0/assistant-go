@@ -50,7 +50,8 @@ type QueryRequest struct {
 	UserID *string `json:"user_id,omitempty"`
 
 	// Context provides additional key-value pairs for request processing
-	Context map[string]interface{} `json:"context,omitempty"`
+	// TODO: Replace with typed RequestContext struct
+	Context map[string]any `json:"context,omitempty"`
 
 	// Tools specifies which tools should be available for this request
 	Tools []string `json:"tools,omitempty"`
@@ -100,7 +101,8 @@ type QueryResponse struct {
 	ToolsUsed []string `json:"tools_used,omitempty"`
 
 	// Context contains additional metadata about the processing
-	Context map[string]interface{} `json:"context,omitempty"`
+	// TODO: Replace with typed ResponseContext struct
+	Context map[string]any `json:"context,omitempty"`
 
 	// Error contains error message if something went wrong
 	Error *string `json:"error,omitempty"`
@@ -343,35 +345,35 @@ func (a *Assistant) registerBuiltinTools(ctx context.Context) error {
 // registerGoTools registers Go development tools
 func (a *Assistant) registerGoTools() error {
 	// Register Go Analyzer
-	if err := a.registry.Register("go_analyzer", func(config map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+	if err := a.registry.Register("go_analyzer", func(config map[string]any, logger *slog.Logger) (tools.Tool, error) {
 		return godev.NewGoAnalyzer(config, logger)
 	}); err != nil {
 		return fmt.Errorf("failed to register go_analyzer: %w", err)
 	}
 
 	// Register Go Formatter
-	if err := a.registry.Register("go_formatter", func(config map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+	if err := a.registry.Register("go_formatter", func(config map[string]any, logger *slog.Logger) (tools.Tool, error) {
 		return godev.NewGoFormatter(config, logger)
 	}); err != nil {
 		return fmt.Errorf("failed to register go_formatter: %w", err)
 	}
 
 	// Register Go Tester
-	if err := a.registry.Register("go_tester", func(config map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+	if err := a.registry.Register("go_tester", func(config map[string]any, logger *slog.Logger) (tools.Tool, error) {
 		return godev.NewGoTester(config, logger)
 	}); err != nil {
 		return fmt.Errorf("failed to register go_tester: %w", err)
 	}
 
 	// Register Go Builder
-	if err := a.registry.Register("go_builder", func(config map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+	if err := a.registry.Register("go_builder", func(config map[string]any, logger *slog.Logger) (tools.Tool, error) {
 		return godev.NewGoBuilder(config, logger)
 	}); err != nil {
 		return fmt.Errorf("failed to register go_builder: %w", err)
 	}
 
 	// Register Go Dependency Analyzer
-	if err := a.registry.Register("go_dependency_analyzer", func(config map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+	if err := a.registry.Register("go_dependency_analyzer", func(config map[string]any, logger *slog.Logger) (tools.Tool, error) {
 		return godev.NewGoDependencyAnalyzer(config, logger)
 	}); err != nil {
 		return fmt.Errorf("failed to register go_dependency_analyzer: %w", err)
@@ -381,47 +383,140 @@ func (a *Assistant) registerGoTools() error {
 	return nil
 }
 
+// AssistantStats represents comprehensive statistics for the assistant
+type AssistantStats struct {
+	// Database contains database connection pool statistics
+	Database *DatabaseStats `json:"database"`
+
+	// Tools contains tool registry statistics
+	Tools *ToolRegistryStats `json:"tools,omitempty"`
+
+	// Processor contains request processor statistics
+	Processor *ProcessorStats `json:"processor,omitempty"`
+}
+
+// DatabaseStats represents database pool statistics
+type DatabaseStats struct {
+	// Status indicates the database connection status
+	Status string `json:"status"`
+
+	// TotalConns is the total number of connections in the pool
+	TotalConns int32 `json:"total_connections"`
+
+	// IdleConns is the number of idle connections
+	IdleConns int32 `json:"idle_connections"`
+
+	// AcquiredConns is the number of currently acquired connections
+	AcquiredConns int32 `json:"acquired_connections"`
+
+	// ConstructingConns is the number of connections being constructed
+	ConstructingConns int32 `json:"constructing_connections"`
+
+	// MaxConns is the maximum number of connections allowed
+	MaxConns int32 `json:"max_connections"`
+
+	// NewConnsCount is the total number of new connections created
+	NewConnsCount int64 `json:"new_connections_count"`
+
+	// AcquireCount is the total number of successful connection acquisitions
+	AcquireCount int64 `json:"acquire_count"`
+
+	// AcquireDurationMs is the total duration spent acquiring connections in milliseconds
+	AcquireDurationMs int64 `json:"acquire_duration_ms"`
+}
+
+// ToolRegistryStats represents tool registry statistics
+type ToolRegistryStats struct {
+	// RegisteredTools is the count of registered tools
+	RegisteredTools int `json:"registered_tools"`
+
+	// ExecutionCounts maps tool names to their execution counts
+	ExecutionCounts map[string]int64 `json:"execution_counts,omitempty"`
+
+	// AverageExecutionTimes maps tool names to their average execution times in milliseconds
+	AverageExecutionTimes map[string]int64 `json:"average_execution_times_ms,omitempty"`
+}
+
+// ProcessorStats represents request processor statistics
+type ProcessorStats struct {
+	// RequestsProcessed is the total number of processed requests
+	RequestsProcessed int64 `json:"requests_processed"`
+
+	// AverageProcessingTimeMs is the average processing time in milliseconds
+	AverageProcessingTimeMs int64 `json:"average_processing_time_ms"`
+
+	// ProviderCounts maps provider names to their usage counts
+	ProviderCounts map[string]int64 `json:"provider_counts,omitempty"`
+}
+
 // Stats returns assistant statistics
-func (a *Assistant) Stats(ctx context.Context) (map[string]interface{}, error) {
-	stats := make(map[string]interface{})
+func (a *Assistant) Stats(ctx context.Context) (*AssistantStats, error) {
+	stats := &AssistantStats{}
 
 	// Database stats
-	dbStats := a.db.Stats()
-	if dbStats != nil {
-		// Only access stats if we have a real database connection
-		stats["database"] = map[string]interface{}{
-			"total_connections":        dbStats.TotalConns(),
-			"idle_connections":         dbStats.IdleConns(),
-			"acquired_connections":     dbStats.AcquiredConns(),
-			"constructing_connections": dbStats.ConstructingConns(),
+	poolStats := a.db.GetPoolStats()
+	if poolStats != nil {
+		// Use typed pool statistics
+		stats.Database = &DatabaseStats{
+			Status:            "connected",
+			TotalConns:        poolStats.TotalConns,
+			IdleConns:         poolStats.IdleConns,
+			AcquiredConns:     poolStats.AcquiredConns,
+			ConstructingConns: poolStats.ConstructingConns,
+			MaxConns:          poolStats.MaxConns,
+			NewConnsCount:     poolStats.NewConnsCount,
+			AcquireCount:      poolStats.AcquireCount,
+			AcquireDurationMs: poolStats.AcquireDuration.Milliseconds(),
 		}
 	} else {
 		// Demo mode - return mock stats
-		stats["database"] = map[string]interface{}{
-			"status":               "demo_mode",
-			"total_connections":    0,
-			"idle_connections":     0,
-			"acquired_connections": 0,
+		stats.Database = &DatabaseStats{
+			Status:            "demo_mode",
+			TotalConns:        0,
+			IdleConns:         0,
+			AcquiredConns:     0,
+			ConstructingConns: 0,
+			MaxConns:          0,
 		}
 	}
 
-	// Tool registry stats
-	toolStats, err := a.registry.Stats(ctx)
+	// Tool registry stats - temporarily keep as map until we update registry
+	toolStatsMap, err := a.registry.Stats(ctx)
 	if err != nil {
 		a.logger.Warn("Failed to get tool registry stats", slog.Any("error", err))
-	} else {
-		stats["tools"] = toolStats
+	} else if toolStatsMap != nil {
+		// Convert map to typed struct
+		stats.Tools = &ToolRegistryStats{
+			RegisteredTools: len(a.registry.ListTools()),
+		}
+		// TODO: Extract execution counts and times from toolStatsMap when registry is updated
 	}
 
-	// Processor stats
-	processorStats, err := a.processor.Stats(ctx)
+	// Processor stats - temporarily keep as map until we update processor
+	processorStatsMap, err := a.processor.Stats(ctx)
 	if err != nil {
 		a.logger.Warn("Failed to get processor stats", slog.Any("error", err))
-	} else {
-		stats["processor"] = processorStats
+	} else if processorStatsMap != nil {
+		// Convert map to typed struct
+		stats.Processor = &ProcessorStats{}
+		// TODO: Extract counts and times from processorStatsMap when processor is updated
 	}
 
 	return stats, nil
+}
+
+// ToolExecutionRequest represents a request to execute a tool
+type ToolExecutionRequest struct {
+	// ToolName is the name of the tool to execute
+	ToolName string `json:"tool_name"`
+
+	// Input contains tool-specific input parameters
+	// TODO: Replace with tool-specific typed inputs when tools are refactored
+	Input map[string]any `json:"input"`
+
+	// Config contains tool-specific configuration
+	// TODO: Replace with tool-specific typed config when tools are refactored
+	Config map[string]any `json:"config,omitempty"`
 }
 
 // ExecuteTool provides direct access to tool execution without going through
@@ -432,32 +527,39 @@ func (a *Assistant) Stats(ctx context.Context) (map[string]interface{}, error) {
 //
 // Parameters:
 //   - ctx: Context for tool execution
-//   - toolName: Name of the registered tool to execute
-//   - input: Tool-specific input parameters
-//   - config: Tool-specific configuration (nil for defaults)
+//   - req: Tool execution request with name, input, and config
 //
 // Returns:
 //   - *tools.ToolResult: Tool execution results
 //   - error: Execution error if any
-func (a *Assistant) ExecuteTool(ctx context.Context, toolName string, input map[string]interface{}, config map[string]interface{}) (*tools.ToolResult, error) {
-	a.logger.Info("Executing tool directly",
-		slog.String("tool", toolName),
-		slog.Any("input", input))
-
-	if config == nil {
-		config = make(map[string]interface{})
+func (a *Assistant) ExecuteTool(ctx context.Context, req *ToolExecutionRequest) (*tools.ToolResult, error) {
+	if req == nil {
+		return nil, NewInvalidInputError("tool execution request is required", nil)
 	}
 
-	result, err := a.registry.Execute(ctx, toolName, input, config)
+	if req.ToolName == "" {
+		return nil, NewInvalidInputError("tool name is required", nil)
+	}
+
+	a.logger.Info("Executing tool directly",
+		slog.String("tool", req.ToolName),
+		slog.Any("input", req.Input))
+
+	config := req.Config
+	if config == nil {
+		config = make(map[string]any)
+	}
+
+	result, err := a.registry.Execute(ctx, req.ToolName, req.Input, config)
 	if err != nil {
 		a.logger.Error("Tool execution failed",
-			slog.String("tool", toolName),
+			slog.String("tool", req.ToolName),
 			slog.Any("error", err))
 		return nil, err
 	}
 
 	a.logger.Info("Tool execution completed",
-		slog.String("tool", toolName),
+		slog.String("tool", req.ToolName),
 		slog.Bool("success", result.Success),
 		slog.Duration("execution_time", result.ExecutionTime))
 

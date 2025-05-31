@@ -33,6 +33,9 @@ type ClientInterface interface {
 	// Stats returns database pool statistics
 	Stats() *pgxpool.Stat
 
+	// GetPoolStats returns typed pool statistics
+	GetPoolStats() *PoolStats
+
 	// Close closes the database connection
 	Close() error
 }

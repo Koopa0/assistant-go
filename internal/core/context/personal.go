@@ -415,23 +415,32 @@ type AdaptationStrategy struct {
 	Active      bool
 }
 
+// PersonalPreferencesSnapshot contains a snapshot of user preferences without mutexes
+type PersonalPreferencesSnapshot struct {
+	General     GeneralPreferences
+	Development DevelopmentPreferences
+	Interface   InterfacePreferences
+	Tools       ToolPreferences
+	AI          AIPreferences
+}
+
 // PersonalInfo contains relevant personal context for a request
 type PersonalInfo struct {
-	Preferences      UserPreferences
-	RelevantHabits   []string
-	SkillContext     []SkillLevel
-	LearningContext  []LearningGoal
-	Adaptations      []string
-	PersonalityScore float64
+	PreferencesSnapshot PersonalPreferencesSnapshot
+	RelevantHabits      []string
+	SkillContext        []SkillLevel
+	LearningContext     []LearningGoal
+	Adaptations         []string
+	PersonalityScore    float64
 }
 
 // PersonalState represents current personal context state
 type PersonalState struct {
-	Preferences       UserPreferences
-	ActiveHabits      []string
-	CurrentGoals      []LearningGoal
-	ActiveAdaptations []string
-	LastUpdate        time.Time
+	PreferencesSnapshot PersonalPreferencesSnapshot
+	ActiveHabits        []string
+	CurrentGoals        []LearningGoal
+	ActiveAdaptations   []string
+	LastUpdate          time.Time
 }
 
 // NewPersonalContext creates a new personal context
@@ -548,13 +557,24 @@ func (pc *PersonalContext) GetPreferences(ctx context.Context, request Request) 
 	// Calculate personality score based on request alignment
 	personalityScore := pc.calculatePersonalityAlignment(request)
 
+	// Create a snapshot of preferences without mutexes
+	pc.preferences.mu.RLock()
+	preferencesSnapshot := PersonalPreferencesSnapshot{
+		General:     pc.preferences.General,
+		Development: pc.preferences.Development,
+		Interface:   pc.preferences.Interface,
+		Tools:       pc.preferences.Tools,
+		AI:          pc.preferences.AI,
+	}
+	pc.preferences.mu.RUnlock()
+
 	info := PersonalInfo{
-		Preferences:      *pc.preferences,
-		RelevantHabits:   relevantHabits,
-		SkillContext:     skillContext,
-		LearningContext:  learningContext,
-		Adaptations:      adaptations,
-		PersonalityScore: personalityScore,
+		PreferencesSnapshot: preferencesSnapshot,
+		RelevantHabits:      relevantHabits,
+		SkillContext:        skillContext,
+		LearningContext:     learningContext,
+		Adaptations:         adaptations,
+		PersonalityScore:    personalityScore,
 	}
 
 	pc.logger.Info("Personal preferences retrieved",
@@ -589,12 +609,23 @@ func (pc *PersonalContext) GetCurrentState() PersonalState {
 	currentGoals := pc.getCurrentGoals()
 	activeAdaptations := pc.getActiveAdaptations()
 
+	// Create a snapshot of preferences without mutexes
+	pc.preferences.mu.RLock()
+	preferencesSnapshot := PersonalPreferencesSnapshot{
+		General:     pc.preferences.General,
+		Development: pc.preferences.Development,
+		Interface:   pc.preferences.Interface,
+		Tools:       pc.preferences.Tools,
+		AI:          pc.preferences.AI,
+	}
+	pc.preferences.mu.RUnlock()
+
 	return PersonalState{
-		Preferences:       *pc.preferences,
-		ActiveHabits:      activeHabits,
-		CurrentGoals:      currentGoals,
-		ActiveAdaptations: activeAdaptations,
-		LastUpdate:        time.Now(),
+		PreferencesSnapshot: preferencesSnapshot,
+		ActiveHabits:        activeHabits,
+		CurrentGoals:        currentGoals,
+		ActiveAdaptations:   activeAdaptations,
+		LastUpdate:          time.Now(),
 	}
 }
 

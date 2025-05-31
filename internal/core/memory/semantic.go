@@ -419,7 +419,7 @@ type ReasoningCache struct {
 
 // ConceptLearningEngine learns new concepts
 type ConceptLearningEngine struct {
-	strategies  []LearningStrategy
+	strategies  []LearningStrategyInterface
 	threshold   float64
 	minExamples int
 	mu          sync.RWMutex
@@ -493,7 +493,7 @@ func NewSemanticMemory(eventBus *events.EventBus, logger *slog.Logger) (*Semanti
 	}
 
 	learningEngine := &ConceptLearningEngine{
-		strategies:  make([]LearningStrategy, 0),
+		strategies:  make([]LearningStrategyInterface, 0),
 		threshold:   0.7,
 		minExamples: 3,
 	}
@@ -636,13 +636,13 @@ func (sm *SemanticMemory) Query(ctx context.Context, query SemanticQuery) ([]*Co
 	var results []*Concept
 
 	switch query.Type {
-	case QueryTypeConcept:
+	case SemanticQueryTypeConcept:
 		results = sm.queryByConcept(query)
-	case QueryTypeRelation:
+	case SemanticQueryTypeRelation:
 		results = sm.queryByRelation(query)
-	case QueryTypeProperty:
+	case SemanticQueryTypeProperty:
 		results = sm.queryByProperty(query)
-	case QueryTypeSimilarity:
+	case SemanticQueryTypeSimilarity:
 		results = sm.queryBySimilarity(query)
 	default:
 		return nil, fmt.Errorf("unsupported query type: %s", query.Type)

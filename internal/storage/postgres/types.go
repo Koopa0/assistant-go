@@ -2,10 +2,54 @@ package postgres
 
 import (
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Domain types for the postgres package
 // These types represent the domain model for database operations
+
+// PoolStats represents database connection pool statistics
+// This is a typed interface for pgxpool.Stat methods
+type PoolStats struct {
+	// Connection metrics
+	AcquireCount            int64         `json:"acquire_count"`              // Total times connection was acquired from pool
+	AcquireDuration         time.Duration `json:"acquire_duration"`           // Total time spent acquiring connections
+	AcquiredConns           int32         `json:"acquired_conns"`             // Current number of acquired connections
+	CanceledAcquireCount    int64         `json:"canceled_acquire_count"`     // Times connection acquire was canceled
+	ConstructingConns       int32         `json:"constructing_conns"`         // Current number of connections being constructed
+	EmptyAcquireCount       int64         `json:"empty_acquire_count"`        // Times acquire was called on empty pool
+	EmptyAcquireWaitTime    time.Duration `json:"empty_acquire_wait_time"`    // Total time waiting for connection when pool was empty
+	IdleConns               int32         `json:"idle_conns"`                 // Current number of idle connections
+	MaxConns                int32         `json:"max_conns"`                  // Maximum number of connections allowed
+	MaxIdleDestroyCount     int64         `json:"max_idle_destroy_count"`     // Connections destroyed due to max idle time
+	MaxLifetimeDestroyCount int64         `json:"max_lifetime_destroy_count"` // Connections destroyed due to max lifetime
+	NewConnsCount           int64         `json:"new_conns_count"`            // Total new connections created
+	TotalConns              int32         `json:"total_conns"`                // Current total number of connections
+}
+
+// NewPoolStatsFromPgxStat creates a PoolStats from pgxpool.Stat
+func NewPoolStatsFromPgxStat(stat *pgxpool.Stat) *PoolStats {
+	if stat == nil {
+		return nil
+	}
+
+	return &PoolStats{
+		AcquireCount:            stat.AcquireCount(),
+		AcquireDuration:         stat.AcquireDuration(),
+		AcquiredConns:           stat.AcquiredConns(),
+		CanceledAcquireCount:    stat.CanceledAcquireCount(),
+		ConstructingConns:       stat.ConstructingConns(),
+		EmptyAcquireCount:       stat.EmptyAcquireCount(),
+		EmptyAcquireWaitTime:    stat.EmptyAcquireWaitTime(),
+		IdleConns:               stat.IdleConns(),
+		MaxConns:                stat.MaxConns(),
+		MaxIdleDestroyCount:     stat.MaxIdleDestroyCount(),
+		MaxLifetimeDestroyCount: stat.MaxLifetimeDestroyCount(),
+		NewConnsCount:           stat.NewConnsCount(),
+		TotalConns:              stat.TotalConns(),
+	}
+}
 
 // Conversation represents a conversation in the database
 type Conversation struct {

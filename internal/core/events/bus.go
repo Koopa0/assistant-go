@@ -181,6 +181,18 @@ type EventMetrics struct {
 	mu              sync.RWMutex
 }
 
+// EventMetricsSnapshot is a snapshot of event metrics without mutexes
+type EventMetricsSnapshot struct {
+	TotalEvents     int64
+	ProcessedEvents int64
+	FailedEvents    int64
+	AverageLatency  time.Duration
+	ThroughputRate  float64
+	ErrorRate       float64
+	DeadLetterCount int64
+	LastUpdated     time.Time
+}
+
 // DeadLetterQueue handles failed events
 type DeadLetterQueue struct {
 	events     []DeadLetterEvent
@@ -609,12 +621,21 @@ func (eb *EventBus) updateMetrics(updater func(*EventMetrics)) {
 	eb.metrics.LastUpdated = time.Now()
 }
 
-// GetMetrics returns current event metrics
-func (eb *EventBus) GetMetrics() EventMetrics {
+// GetMetrics returns current event metrics snapshot
+func (eb *EventBus) GetMetrics() EventMetricsSnapshot {
 	eb.metrics.mu.RLock()
 	defer eb.metrics.mu.RUnlock()
 
-	return *eb.metrics
+	return EventMetricsSnapshot{
+		TotalEvents:     eb.metrics.TotalEvents,
+		ProcessedEvents: eb.metrics.ProcessedEvents,
+		FailedEvents:    eb.metrics.FailedEvents,
+		AverageLatency:  eb.metrics.AverageLatency,
+		ThroughputRate:  eb.metrics.ThroughputRate,
+		ErrorRate:       eb.metrics.ErrorRate,
+		DeadLetterCount: eb.metrics.DeadLetterCount,
+		LastUpdated:     eb.metrics.LastUpdated,
+	}
 }
 
 // GetDeadLetterEvents returns dead letter events

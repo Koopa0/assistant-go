@@ -74,6 +74,26 @@ func (m *MockClient) Stats() *pgxpool.Stat {
 	return nil
 }
 
+// GetPoolStats returns typed pool statistics
+func (m *MockClient) GetPoolStats() *PoolStats {
+	// Return mock statistics for demo mode
+	return &PoolStats{
+		AcquireCount:            100,
+		AcquireDuration:         5 * time.Second,
+		AcquiredConns:           2,
+		CanceledAcquireCount:    0,
+		ConstructingConns:       0,
+		EmptyAcquireCount:       0,
+		EmptyAcquireWaitTime:    0,
+		IdleConns:               3,
+		MaxConns:                10,
+		MaxIdleDestroyCount:     0,
+		MaxLifetimeDestroyCount: 0,
+		NewConnsCount:           5,
+		TotalConns:              5,
+	}
+}
+
 // Close closes the mock database connection
 func (m *MockClient) Close() error {
 	m.logger.Debug("Mock database connection closed")

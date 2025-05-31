@@ -92,6 +92,11 @@ func (c *Client) Stats() *pgxpool.Stat {
 	return c.pool.Stat()
 }
 
+// GetPoolStats returns typed pool statistics
+func (c *Client) GetPoolStats() *PoolStats {
+	return NewPoolStatsFromPgxStat(c.Stats())
+}
+
 // Begin starts a new transaction
 func (c *Client) Begin(ctx context.Context) (pgx.Tx, error) {
 	return c.pool.Begin(ctx)

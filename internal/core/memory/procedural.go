@@ -1364,17 +1364,17 @@ func (pm *ProceduralMemory) scoreProcedure(procedure *Procedure, query Procedura
 
 	// Score based on query type
 	switch query.Type {
-	case QueryFastest:
+	case ProceduralQueryFastest:
 		// Prefer procedures with shorter average time
 		if procedure.AverageTime < 1*time.Minute {
 			score += 0.3
 		}
-	case QuerySafest:
+	case ProceduralQuerySafest:
 		// Prefer procedures without high-risk steps
 		if !pm.hasHighRiskSteps(procedure) {
 			score += 0.4
 		}
-	case QueryOptimal:
+	case ProceduralQueryOptimal:
 		// Balance between success rate and efficiency
 		score += procedure.Reliability * 0.2
 		score += (1.0 - procedure.ComplexityScore) * 0.2
