@@ -19,13 +19,14 @@ type Config struct {
 	Security  SecurityConfig `yaml:"security"`
 }
 
-// DatabaseConfig holds PostgreSQL configuration
+// DatabaseConfig holds PostgreSQL configuration optimized for PostgreSQL 17
 type DatabaseConfig struct {
-	URL            string        `yaml:"url" env:"DATABASE_URL" required:"true"`
-	MaxConnections int           `yaml:"max_connections" env:"DB_MAX_CONNECTIONS" default:"25"`
-	MinConnections int           `yaml:"min_connections" env:"DB_MIN_CONNECTIONS" default:"5"`
-	MaxIdleTime    time.Duration `yaml:"max_idle_time" env:"DB_MAX_IDLE_TIME" default:"15m"`
-	MaxLifetime    time.Duration `yaml:"max_lifetime" env:"DB_MAX_LIFETIME" default:"1h"`
+	URL string `yaml:"url" env:"DATABASE_URL" required:"true"`
+	// PostgreSQL 17 optimized connection pool settings (based on golang_guide.md)
+	MaxConnections int           `yaml:"max_connections" env:"DB_MAX_CONNECTIONS" default:"30"` // Based on CPU cores
+	MinConnections int           `yaml:"min_connections" env:"DB_MIN_CONNECTIONS" default:"5"`  // Keep minimum connections
+	MaxIdleTime    time.Duration `yaml:"max_idle_time" env:"DB_MAX_IDLE_TIME" default:"15m"`    // Close idle connections
+	MaxLifetime    time.Duration `yaml:"max_lifetime" env:"DB_MAX_LIFETIME" default:"1h"`       // Connection rotation
 	ConnectTimeout time.Duration `yaml:"connect_timeout" env:"DB_CONNECT_TIMEOUT" default:"10s"`
 	MigrationsPath string        `yaml:"migrations_path" env:"DB_MIGRATIONS_PATH" default:"internal/storage/postgres/migrations"`
 	EnableLogging  bool          `yaml:"enable_logging" env:"DB_ENABLE_LOGGING" default:"false"`

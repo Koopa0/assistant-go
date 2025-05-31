@@ -106,22 +106,60 @@ test: ## Run tests
 test-short: ## Run short tests
 	go test -v -short ./...
 
+.PHONY: test-unit
+test-unit: ## Run unit tests with coverage
+	@echo "Running unit tests..."
+	@mkdir -p coverage
+	go test -v -race -coverprofile=coverage/unit.out -covermode=atomic ./internal/... ./cmd/...
+	@if [ -f coverage/unit.out ]; then \
+		go tool cover -html=coverage/unit.out -o coverage/unit.html; \
+		echo "Unit test coverage report: coverage/unit.html"; \
+	fi
+
 .PHONY: test-integration
 test-integration: ## Run integration tests
-	go test -v -tags=integration ./test/integration/...
+	@echo "Running integration tests..."
+	@mkdir -p coverage
+	go test -v -tags=integration -coverprofile=coverage/integration.out ./test/integration/...
+	@if [ -f coverage/integration.out ]; then \
+		go tool cover -html=coverage/integration.out -o coverage/integration.html; \
+		echo "Integration test coverage report: coverage/integration.html"; \
+	fi
 
 .PHONY: test-e2e
 test-e2e: ## Run end-to-end tests
-	go test -v -tags=e2e ./test/e2e/...
+	@echo "Running end-to-end tests..."
+	go test -v -tags=e2e -timeout=10m ./test/e2e/...
 
 .PHONY: test-coverage
 test-coverage: test ## Generate test coverage report
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report generated: coverage.html"
 
-.PHONY: benchmark
-benchmark: ## Run benchmarks
-	go test -bench=. -benchmem ./...
+.PHONY: test-race
+test-race: ## Run tests with race detection
+	@echo "Running race condition tests..."
+	go test -race -short ./...
+
+.PHONY: test-fuzz
+test-fuzz: ## Run fuzz tests
+	@echo "Running fuzz tests..."
+	@find . -name "*_test.go" -exec grep -l "func Fuzz" {} \; | while read file; do \
+		dir=$$(dirname "$$file"); \
+		echo "Fuzzing in $$dir"; \
+		go test -fuzz=. -fuzztime=30s "$$dir" || true; \
+	done
+
+.PHONY: test-comprehensive
+test-comprehensive: ## Run comprehensive test suite
+	@echo "Running comprehensive test suite..."
+	./scripts/run-comprehensive-tests.sh
+
+.PHONY: test-security
+test-security: ## Run security tests
+	@echo "Running security tests..."
+	./scripts/run-comprehensive-tests.sh security
+
 
 # Code quality targets
 .PHONY: lint
@@ -164,6 +202,69 @@ verify-lint: ## Lint verification for CI (handles compatibility issues)
 fmt: ## Format code
 	go fmt ./...
 	goimports -w .
+
+# Performance profiling targets (golang_guide.md recommendations)
+.PHONY: profile-cpu
+profile-cpu: ## Collect CPU profile from running server
+	@echo "🔍 Collecting CPU profile (30 seconds)..."
+	curl -o cpu.pprof "http://localhost:6060/debug/pprof/profile?seconds=30"
+	@echo "✅ CPU profile saved to cpu.pprof"
+	@echo "💡 Analyze with: go tool pprof cpu.pprof"
+
+.PHONY: profile-mem
+profile-mem: ## Collect memory profile from running server
+	@echo "🔍 Collecting memory profile..."
+	curl -o mem.pprof "http://localhost:6060/debug/pprof/heap"
+	@echo "✅ Memory profile saved to mem.pprof"
+	@echo "💡 Analyze with: go tool pprof mem.pprof"
+
+.PHONY: profile-goroutine
+profile-goroutine: ## Collect goroutine profile from running server
+	@echo "🔍 Collecting goroutine profile..."
+	curl -o goroutine.pprof "http://localhost:6060/debug/pprof/goroutine"
+	@echo "✅ Goroutine profile saved to goroutine.pprof"
+	@echo "💡 Analyze with: go tool pprof goroutine.pprof"
+
+.PHONY: profile-all
+profile-all: profile-cpu profile-mem profile-goroutine ## Collect all profiles
+	@echo "✅ All profiles collected"
+
+.PHONY: pgo-collect
+pgo-collect: ## Collect production profile for PGO optimization
+	@echo "🚀 Collecting PGO profile..."
+	./scripts/collect-pgo-profile.sh
+
+.PHONY: pgo-build
+pgo-build: ## Build with PGO optimization (requires default.pgo)
+	@echo "🔧 Building with PGO optimization..."
+	@if [ -f default.pgo ]; then \
+		echo "✅ Found default.pgo, building with PGO..."; \
+		go build -o $(BUILD_DIR)/$(BINARY_NAME) $(MAIN_PATH); \
+		echo "✅ PGO build complete"; \
+	else \
+		echo "❌ default.pgo not found. Run 'make pgo-collect' first"; \
+		exit 1; \
+	fi
+
+.PHONY: pgo-verify
+pgo-verify: ## Verify PGO is enabled in build
+	@echo "🔍 Verifying PGO is enabled..."
+	@go build -x 2>&1 | grep -i pgo || echo "❌ PGO not detected"
+
+.PHONY: benchmark
+benchmark: ## Run benchmarks
+	@echo "🏁 Running benchmarks..."
+	go test -bench=. -benchmem ./...
+
+.PHONY: benchmark-compare
+benchmark-compare: ## Compare benchmarks with and without PGO
+	@echo "📊 Comparing performance with and without PGO..."
+	@echo "Running without PGO..."
+	go test -bench=. -pgo=off -count=10 ./... > bench-no-pgo.txt
+	@echo "Running with PGO..."
+	go test -bench=. -pgo=auto -count=10 ./... > bench-with-pgo.txt
+	@echo "Comparing results..."
+	benchstat bench-no-pgo.txt bench-with-pgo.txt || echo "Install benchstat: go install golang.org/x/perf/cmd/benchstat@latest"
 
 .PHONY: vet
 vet: ## Run go vet

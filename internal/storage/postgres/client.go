@@ -27,18 +27,24 @@ func NewClient(ctx context.Context, cfg config.DatabaseConfig) (*Client, error) 
 		return nil, fmt.Errorf("failed to parse database URL: %w", err)
 	}
 
-	// Configure connection pool
+	// Configure connection pool with PostgreSQL 17 optimizations
+	// Based on golang_guide.md PostgreSQL 17 best practices
 	poolConfig.MaxConns = int32(cfg.MaxConnections)
 	poolConfig.MinConns = int32(cfg.MinConnections)
-	poolConfig.MaxConnIdleTime = cfg.MaxIdleTime
-	poolConfig.MaxConnLifetime = cfg.MaxLifetime
-	poolConfig.HealthCheckPeriod = 1 * time.Minute
+	poolConfig.MaxConnLifetime = cfg.MaxLifetime // Connection rotation for PostgreSQL 17
+	poolConfig.MaxConnIdleTime = cfg.MaxIdleTime // Close idle connections
+	poolConfig.HealthCheckPeriod = time.Minute   // Regular health checks
 
 	// Configure connection settings
 	poolConfig.ConnConfig.ConnectTimeout = cfg.ConnectTimeout
 	poolConfig.ConnConfig.RuntimeParams = map[string]string{
 		"application_name": "goassistant",
 		"timezone":         "UTC",
+		// PostgreSQL 17 performance optimizations
+		"track_io_timing":            "on",                 // Enable I/O timing for EXPLAIN ANALYZE
+		"log_statement_stats":        "off",                // Use pg_stat_statements instead
+		"log_min_duration_statement": "1000",               // Log slow queries (1s+)
+		"shared_preload_libraries":   "pg_stat_statements", // Enable query statistics
 	}
 
 	// Enable logging if configured
@@ -233,4 +239,21 @@ func (c *Client) Health(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// NewOptimizedClient creates a PostgreSQL client optimized for PostgreSQL 17
+// This is a convenience function that creates a client with recommended settings for PostgreSQL 17
+func NewOptimizedClient(ctx context.Context, databaseURL string) (*Client, error) {
+	// Use optimized default configuration for PostgreSQL 17
+	cfg := config.DatabaseConfig{
+		URL:            databaseURL,
+		MaxConnections: 30,               // Based on CPU cores (golang_guide.md recommendation)
+		MinConnections: 5,                // Keep minimum connections warm
+		MaxIdleTime:    15 * time.Minute, // Close idle connections
+		MaxLifetime:    time.Hour,        // Connection rotation
+		ConnectTimeout: 10 * time.Second,
+		EnableLogging:  false,
+	}
+
+	return NewClient(ctx, cfg)
 }

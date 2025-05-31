@@ -361,3 +361,183 @@ func (pm *PerformanceMonitor) Health(ctx context.Context) error {
 	pm.collector.Gauge("system_health", map[string]string{"component": "performance_monitor"}, 1)
 	return nil
 }
+
+// RateLimiter implements AI provider rate limiting
+type RateLimiter struct {
+	limits    map[string]*ProviderLimit
+	mutex     sync.RWMutex
+	logger    *slog.Logger
+	collector *MetricsCollector
+}
+
+// ProviderLimit represents rate limiting configuration for a provider
+type ProviderLimit struct {
+	RequestsPerMinute int
+	TokensPerMinute   int
+	RequestCount      int
+	TokenCount        int
+	LastReset         time.Time
+	Blocked           bool
+}
+
+// NewRateLimiter creates a new rate limiter
+func NewRateLimiter(collector *MetricsCollector, logger *slog.Logger) *RateLimiter {
+	return &RateLimiter{
+		limits:    make(map[string]*ProviderLimit),
+		logger:    logger,
+		collector: collector,
+	}
+}
+
+// SetProviderLimit sets rate limiting for a provider
+func (rl *RateLimiter) SetProviderLimit(provider string, requestsPerMinute, tokensPerMinute int) {
+	rl.mutex.Lock()
+	defer rl.mutex.Unlock()
+
+	rl.limits[provider] = &ProviderLimit{
+		RequestsPerMinute: requestsPerMinute,
+		TokensPerMinute:   tokensPerMinute,
+		LastReset:         time.Now(),
+	}
+
+	rl.logger.Info("Rate limit set for provider",
+		slog.String("provider", provider),
+		slog.Int("requests_per_minute", requestsPerMinute),
+		slog.Int("tokens_per_minute", tokensPerMinute))
+}
+
+// CheckLimit checks if a request is within rate limits
+func (rl *RateLimiter) CheckLimit(provider string, tokensRequested int) bool {
+	rl.mutex.Lock()
+	defer rl.mutex.Unlock()
+
+	limit, exists := rl.limits[provider]
+	if !exists {
+		// No limit set, allow request
+		return true
+	}
+
+	now := time.Now()
+
+	// Reset counters if a minute has passed
+	if now.Sub(limit.LastReset) >= time.Minute {
+		limit.RequestCount = 0
+		limit.TokenCount = 0
+		limit.LastReset = now
+		limit.Blocked = false
+	}
+
+	// Check if adding this request would exceed limits
+	wouldExceedRequests := limit.RequestCount+1 > limit.RequestsPerMinute
+	wouldExceedTokens := limit.TokenCount+tokensRequested > limit.TokensPerMinute
+
+	if wouldExceedRequests || wouldExceedTokens {
+		limit.Blocked = true
+
+		// Record rate limit hit
+		labels := map[string]string{"provider": provider}
+		rl.collector.Counter("rate_limit_hits_total", labels, 1)
+
+		rl.logger.Warn("Rate limit exceeded",
+			slog.String("provider", provider),
+			slog.Int("current_requests", limit.RequestCount),
+			slog.Int("current_tokens", limit.TokenCount),
+			slog.Int("requested_tokens", tokensRequested),
+			slog.Bool("requests_exceeded", wouldExceedRequests),
+			slog.Bool("tokens_exceeded", wouldExceedTokens))
+
+		return false
+	}
+
+	// Update counters
+	limit.RequestCount++
+	limit.TokenCount += tokensRequested
+
+	return true
+}
+
+// GetLimitStatus returns current rate limit status for all providers
+func (rl *RateLimiter) GetLimitStatus() map[string]*ProviderLimit {
+	rl.mutex.RLock()
+	defer rl.mutex.RUnlock()
+
+	result := make(map[string]*ProviderLimit)
+	for provider, limit := range rl.limits {
+		result[provider] = &ProviderLimit{
+			RequestsPerMinute: limit.RequestsPerMinute,
+			TokensPerMinute:   limit.TokensPerMinute,
+			RequestCount:      limit.RequestCount,
+			TokenCount:        limit.TokenCount,
+			LastReset:         limit.LastReset,
+			Blocked:           limit.Blocked,
+		}
+	}
+	return result
+}
+
+// PerformanceRegression detects performance regressions
+type PerformanceRegression struct {
+	collector  *MetricsCollector
+	logger     *slog.Logger
+	baselines  map[string]float64
+	thresholds map[string]float64
+	mutex      sync.RWMutex
+}
+
+// NewPerformanceRegression creates a new performance regression detector
+func NewPerformanceRegression(collector *MetricsCollector, logger *slog.Logger) *PerformanceRegression {
+	return &PerformanceRegression{
+		collector:  collector,
+		logger:     logger,
+		baselines:  make(map[string]float64),
+		thresholds: make(map[string]float64),
+	}
+}
+
+// SetBaseline sets a performance baseline for a metric
+func (pr *PerformanceRegression) SetBaseline(metricName string, baseline float64, threshold float64) {
+	pr.mutex.Lock()
+	defer pr.mutex.Unlock()
+
+	pr.baselines[metricName] = baseline
+	pr.thresholds[metricName] = threshold
+
+	pr.logger.Info("Performance baseline set",
+		slog.String("metric", metricName),
+		slog.Float64("baseline", baseline),
+		slog.Float64("threshold", threshold))
+}
+
+// CheckRegression checks for performance regressions
+func (pr *PerformanceRegression) CheckRegression(metricName string, currentValue float64) bool {
+	pr.mutex.RLock()
+	defer pr.mutex.RUnlock()
+
+	baseline, hasBaseline := pr.baselines[metricName]
+	threshold, hasThreshold := pr.thresholds[metricName]
+
+	if !hasBaseline || !hasThreshold {
+		return false // No baseline set, can't detect regression
+	}
+
+	// Calculate percentage change
+	percentChange := ((currentValue - baseline) / baseline) * 100
+
+	if percentChange > threshold {
+		pr.logger.Warn("Performance regression detected",
+			slog.String("metric", metricName),
+			slog.Float64("baseline", baseline),
+			slog.Float64("current", currentValue),
+			slog.Float64("percent_change", percentChange),
+			slog.Float64("threshold", threshold))
+
+		// Record regression metric
+		labels := map[string]string{"metric": metricName}
+		pr.collector.Counter("performance_regressions_total", labels, 1)
+		pr.collector.Gauge("performance_regression_percent", labels, percentChange)
+
+		return true
+	}
+
+	return false
+}

@@ -51,6 +51,19 @@ type EmbeddingCache struct {
 	ttl     time.Duration
 }
 
+// EmbeddingStats represents statistics about stored embeddings
+type EmbeddingStats struct {
+	TotalCount    int64                       `json:"total_count"`
+	ByContentType map[string]ContentTypeStats `json:"by_content_type"`
+	LastUpdated   time.Time                   `json:"last_updated"`
+}
+
+// ContentTypeStats represents statistics for a specific content type
+type ContentTypeStats struct {
+	Count         int64   `json:"count"`
+	AvgTextLength float64 `json:"avg_text_length"`
+}
+
 // NewService creates a new embedding service
 func NewService(aiManager *ai.Manager, db *postgres.Client, cfg config.Embedding, logger *slog.Logger) (*Service, error) {
 	if aiManager == nil {
@@ -417,4 +430,248 @@ func (c *EmbeddingCache) Clear() {
 	defer c.mutex.Unlock()
 
 	c.cache = make(map[string]*ai.EmbeddingResponse)
+}
+
+// Size returns the current cache size
+func (c *EmbeddingCache) Size() int {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	return len(c.cache)
+}
+
+// BatchGenerateEmbeddings generates embeddings for multiple texts efficiently
+func (s *Service) BatchGenerateEmbeddings(ctx context.Context, texts []string) ([]*ai.EmbeddingResponse, error) {
+	if len(texts) == 0 {
+		return []*ai.EmbeddingResponse{}, nil
+	}
+
+	s.logger.Debug("Generating batch embeddings",
+		slog.Int("count", len(texts)),
+		slog.String("provider", s.config.Provider))
+
+	responses := make([]*ai.EmbeddingResponse, len(texts))
+
+	// Process in parallel with limited concurrency
+	semaphore := make(chan struct{}, 5) // Limit to 5 concurrent requests
+	errChan := make(chan error, len(texts))
+
+	for i, text := range texts {
+		go func(index int, text string) {
+			defer func() {
+				if r := recover(); r != nil {
+					s.logger.Error("Embedding generation goroutine panicked",
+						slog.Any("panic", r),
+						slog.Int("text_index", index),
+						slog.String("text_length", fmt.Sprintf("%d", len(text))))
+					errChan <- fmt.Errorf("embedding generation panicked for text %d: %v", index, r)
+				}
+			}()
+
+			semaphore <- struct{}{}        // Acquire
+			defer func() { <-semaphore }() // Release
+
+			response, err := s.GenerateEmbedding(ctx, text)
+			if err != nil {
+				errChan <- fmt.Errorf("failed to generate embedding for text %d: %w", index, err)
+				return
+			}
+
+			responses[index] = response
+			errChan <- nil
+		}(i, text)
+	}
+
+	// Wait for all to complete
+	var errors []error
+	for i := 0; i < len(texts); i++ {
+		if err := <-errChan; err != nil {
+			errors = append(errors, err)
+		}
+	}
+
+	if len(errors) > 0 {
+		return nil, fmt.Errorf("batch embedding generation failed: %v", errors)
+	}
+
+	s.logger.Debug("Batch embeddings generated successfully",
+		slog.Int("count", len(responses)))
+
+	return responses, nil
+}
+
+// BatchStoreEmbeddings stores multiple embeddings efficiently
+func (s *Service) BatchStoreEmbeddings(ctx context.Context, records []*EmbeddingRecord) error {
+	if len(records) == 0 {
+		return nil
+	}
+
+	s.logger.Debug("Storing batch embeddings",
+		slog.Int("count", len(records)))
+
+	// Use transaction-based batch insert
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	query := `
+		INSERT INTO embeddings (content_type, content_id, content_text, embedding, metadata, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`
+
+	for _, record := range records {
+		embeddingStr := s.vectorToString(record.Embedding)
+		metadataJSON, _ := json.Marshal(record.Metadata)
+
+		_, err := tx.Exec(ctx, query,
+			record.ContentType,
+			record.ContentID,
+			record.ContentText,
+			embeddingStr,
+			metadataJSON,
+			time.Now(),
+		)
+		if err != nil {
+			return fmt.Errorf("failed to insert embedding: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("failed to commit batch embeddings: %w", err)
+	}
+
+	s.logger.Info("Batch embeddings stored successfully",
+		slog.Int("count", len(records)))
+
+	return nil
+}
+
+// GetEmbeddingsByContentType retrieves all embeddings of a specific content type
+func (s *Service) GetEmbeddingsByContentType(ctx context.Context, contentType string, limit, offset int) ([]*EmbeddingRecord, error) {
+	if limit <= 0 {
+		limit = 100 // Default limit
+	}
+
+	query := `
+		SELECT id, content_type, content_id, content_text, embedding, metadata, created_at
+		FROM embeddings
+		WHERE content_type = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3
+	`
+
+	rows, err := s.db.Query(ctx, query, contentType, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get embeddings by content type: %w", err)
+	}
+	defer rows.Close()
+
+	var records []*EmbeddingRecord
+	for rows.Next() {
+		var record EmbeddingRecord
+		var embeddingStr, metadataJSON string
+
+		err := rows.Scan(
+			&record.ID,
+			&record.ContentType,
+			&record.ContentID,
+			&record.ContentText,
+			&embeddingStr,
+			&metadataJSON,
+			&record.CreatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan embedding record: %w", err)
+		}
+
+		record.Embedding = s.stringToVector(embeddingStr)
+
+		record.Metadata = make(map[string]interface{})
+		if metadataJSON != "" && metadataJSON != "{}" {
+			json.Unmarshal([]byte(metadataJSON), &record.Metadata)
+		}
+
+		records = append(records, &record)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating embedding records: %w", err)
+	}
+
+	s.logger.Debug("Retrieved embeddings by content type",
+		slog.String("content_type", contentType),
+		slog.Int("count", len(records)))
+
+	return records, nil
+}
+
+// GetEmbeddingStats returns statistics about stored embeddings
+func (s *Service) GetEmbeddingStats(ctx context.Context) (*EmbeddingStats, error) {
+	query := `
+		SELECT
+			content_type,
+			COUNT(*) as count,
+			AVG(LENGTH(content_text)) as avg_text_length
+		FROM embeddings
+		GROUP BY content_type
+		ORDER BY count DESC
+	`
+
+	rows, err := s.db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get embedding stats: %w", err)
+	}
+	defer rows.Close()
+
+	stats := &EmbeddingStats{
+		ByContentType: make(map[string]ContentTypeStats),
+	}
+
+	var totalCount int64
+	for rows.Next() {
+		var contentType string
+		var count int64
+		var avgTextLength float64
+
+		err := rows.Scan(&contentType, &count, &avgTextLength)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan stats: %w", err)
+		}
+
+		stats.ByContentType[contentType] = ContentTypeStats{
+			Count:         count,
+			AvgTextLength: avgTextLength,
+		}
+
+		totalCount += count
+	}
+
+	stats.TotalCount = totalCount
+	stats.LastUpdated = time.Now()
+
+	return stats, nil
+}
+
+// UpdateEmbeddingMetadata updates the metadata of an existing embedding
+func (s *Service) UpdateEmbeddingMetadata(ctx context.Context, embeddingID string, metadata map[string]interface{}) error {
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	query := `UPDATE embeddings SET metadata = $2 WHERE id = $1`
+	result, err := s.db.Exec(ctx, query, embeddingID, metadataJSON)
+	if err != nil {
+		return fmt.Errorf("failed to update embedding metadata: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("embedding not found: %s", embeddingID)
+	}
+
+	s.logger.Debug("Updated embedding metadata",
+		slog.String("embedding_id", embeddingID))
+
+	return nil
 }

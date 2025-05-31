@@ -574,25 +574,30 @@ func (p *Processor) executeTools(ctx context.Context, toolNames []string, toolPa
 			}
 		}
 
-		// Execute tool with timeout
-		toolCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
+		// Execute tool with timeout (use anonymous function to avoid defer accumulation)
+		var result *tools.ToolResult
+		var toolErr error
+		var executionTime time.Duration
+		func() {
+			toolCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
 
-		startTime := time.Now()
-		result, err := tool.Execute(toolCtx, toolInput)
-		executionTime := time.Since(startTime)
+			startTime := time.Now()
+			result, toolErr = tool.Execute(toolCtx, toolInput)
+			executionTime = time.Since(startTime)
+		}()
 
-		if err != nil {
+		if toolErr != nil {
 			p.logger.Error("Tool execution failed",
 				slog.String("tool", toolName),
 				slog.Duration("execution_time", executionTime),
-				slog.Any("error", err))
+				slog.Any("error", toolErr))
 			results[toolName] = map[string]interface{}{
-				"error":          err.Error(),
+				"error":          toolErr.Error(),
 				"status":         "execution_failed",
 				"execution_time": executionTime.String(),
 			}
-			lastError = err
+			lastError = toolErr
 			continue
 		}
 

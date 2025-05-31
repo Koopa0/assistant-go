@@ -625,10 +625,42 @@ func NewIntegratedMemory(config IntegratedMemoryConfig) (*IntegratedMemory, erro
 	// Initialize default configurations
 	im.initializeDefaults()
 
-	// Start background processes
-	go im.runCoordinationLoop()
-	go im.runSynchronizationLoop()
-	go im.runConsolidationWorkers()
+	// Start background processes with panic recovery
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				im.logger.Error("Memory coordination loop panicked",
+					slog.Any("panic", r))
+				// Attempt to restart the coordination loop
+				go im.runCoordinationLoop()
+			}
+		}()
+		im.runCoordinationLoop()
+	}()
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				im.logger.Error("Memory synchronization loop panicked",
+					slog.Any("panic", r))
+				// Attempt to restart the synchronization loop
+				go im.runSynchronizationLoop()
+			}
+		}()
+		im.runSynchronizationLoop()
+	}()
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				im.logger.Error("Memory consolidation workers panicked",
+					slog.Any("panic", r))
+				// Attempt to restart the consolidation workers
+				go im.runConsolidationWorkers()
+			}
+		}()
+		im.runConsolidationWorkers()
+	}()
 
 	return im, nil
 }
@@ -701,7 +733,15 @@ func (im *IntegratedMemory) Retrieve(ctx context.Context, query UnifiedQuery) (*
 	for _, memType := range memoriesToQuery {
 		wg.Add(1)
 		go func(mt MemoryType) {
-			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					im.logger.Error("Memory query goroutine panicked",
+						slog.Any("panic", r),
+						slog.String("memory_type", string(mt)))
+				}
+				wg.Done()
+			}()
+
 			result, err := im.queryMemory(ctx, mt, query)
 			if err != nil {
 				im.logger.Warn("Failed to query memory",
@@ -1116,7 +1156,19 @@ func (im *IntegratedMemory) runSynchronizationLoop() {
 
 func (im *IntegratedMemory) runConsolidationWorkers() {
 	for i := 0; i < im.consolidator.scheduler.workers; i++ {
-		go im.consolidationWorker()
+		workerID := i
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					im.logger.Error("Memory consolidation worker panicked",
+						slog.Any("panic", r),
+						slog.Int("worker_id", workerID))
+					// Restart the worker
+					go im.consolidationWorker()
+				}
+			}()
+			im.consolidationWorker()
+		}()
 	}
 }
 

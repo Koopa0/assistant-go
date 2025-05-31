@@ -5,13 +5,14 @@ log_format: text
 
 database:
   url: "postgres://koopa@localhost:5432/goassistant?sslmode=disable"
-  max_connections: 10
-  min_connections: 2
-  max_idle_time: "10m"
-  max_lifetime: "30m"
+  # PostgreSQL 17 optimized settings for development
+  max_connections: 15          # Reduced for dev environment but still optimized
+  min_connections: 3           # Keep some connections warm
+  max_idle_time: "10m"         # Close idle connections
+  max_lifetime: "30m"          # Shorter rotation for dev
   connect_timeout: "5s"
   migrations_path: "internal/storage/postgres/migrations"
-  enable_logging: true
+  enable_logging: true         # Keep logging enabled for dev
 
 server:
   address: ":8080"

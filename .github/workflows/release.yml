@@ -1,30 +1,28 @@
-name: Release
+name: Release Pipeline
 
 on:
   push:
     tags:
       - 'v*'
+  release:
+    types: [published]
 
 env:
-  GO_VERSION: "1.24"
-  NODE_VERSION: "20"
+  GO_VERSION: '1.24'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  release:
-    name: Create Release
+  # Pre-release validation
+  pre-release-validation:
+    name: Pre-Release Validation
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      packages: write
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
 

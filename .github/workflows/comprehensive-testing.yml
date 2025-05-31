@@ -1,0 +1,403 @@
+name: Comprehensive Testing Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run weekly performance benchmarks
+    - cron: '0 2 * * 1'
+
+env:
+  GO_VERSION: '1.24'
+  POSTGRES_VERSION: '15'
+  COVERAGE_THRESHOLD: '80'
+
+jobs:
+  # Phase 1: Code Quality and Linting
+  code-quality:
+    name: Code Quality & Linting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install dependencies
+        run: |
+          go mod download
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+          go install golang.org/x/tools/cmd/goimports@latest
+
+      - name: Format check
+        run: |
+          if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+            echo "Code is not formatted. Please run 'gofmt -s -w .'"
+            gofmt -s -l .
+            exit 1
+          fi
+
+      - name: Import check
+        run: |
+          if [ "$(goimports -l . | wc -l)" -gt 0 ]; then
+            echo "Imports are not formatted. Please run 'goimports -w .'"
+            goimports -l .
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Static analysis
+        run: staticcheck ./...
+
+      - name: Security scan
+        run: gosec -quiet ./...
+
+      - name: Lint
+        run: |
+          go install golang.org/x/lint/golint@latest
+          golint -set_exit_status ./...
+
+  # Phase 2: Unit Tests
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: code-quality
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Create coverage directory
+        run: mkdir -p coverage
+
+      - name: Run unit tests
+        run: |
+          go test -v -race -coverprofile=coverage/unit.out -covermode=atomic ./internal/... ./cmd/...
+
+      - name: Generate coverage report
+        run: |
+          go tool cover -html=coverage/unit.out -o coverage/unit.html
+          go tool cover -func=coverage/unit.out | grep total | awk '{print $3}' | sed 's/%//' > coverage/unit-percentage.txt
+
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(cat coverage/unit-percentage.txt)
+          echo "Unit test coverage: ${COVERAGE}%"
+          if (( $(echo "$COVERAGE < ${{ env.COVERAGE_THRESHOLD }}" | bc -l) )); then
+            echo "Coverage ${COVERAGE}% is below threshold ${{ env.COVERAGE_THRESHOLD }}%"
+            exit 1
+          fi
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: coverage/unit.out
+          flags: unit
+          name: unit-tests
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-coverage
+          path: coverage/
+
+  # Phase 3: Integration Tests
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_USER: testuser
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -p 5432 -U testuser; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+
+      - name: Set up test database
+        env:
+          PGPASSWORD: testpass
+        run: |
+          psql -h localhost -U testuser -d testdb -f test/fixtures/init.sql
+
+      - name: Create coverage directory
+        run: mkdir -p coverage
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL: postgres://testuser:testpass@localhost:5432/testdb?sslmode=disable
+          CLAUDE_API_KEY: test-key
+          GEMINI_API_KEY: test-key
+        run: |
+          go test -v -tags=integration -coverprofile=coverage/integration.out ./test/integration/...
+
+      - name: Generate integration coverage report
+        run: |
+          go tool cover -html=coverage/integration.out -o coverage/integration.html
+
+      - name: Upload integration coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: coverage/integration.out
+          flags: integration
+          name: integration-tests
+
+      - name: Upload integration artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-coverage
+          path: coverage/
+
+  # Phase 4: End-to-End Tests
+  e2e-tests:
+    name: End-to-End Tests
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    if: github.event_name == 'push' || github.event_name == 'schedule'
+    services:
+      postgres:
+        image: pgvector/pgvector:pg15
+        env:
+          POSTGRES_PASSWORD: testpass
+          POSTGRES_USER: testuser
+          POSTGRES_DB: testdb
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -p 5432 -U testuser; do
+            echo "Waiting for PostgreSQL..."
+            sleep 2
+          done
+
+      - name: Set up test database
+        env:
+          PGPASSWORD: testpass
+        run: |
+          psql -h localhost -U testuser -d testdb -f test/fixtures/init.sql
+
+      - name: Run E2E tests
+        env:
+          DATABASE_URL: postgres://testuser:testpass@localhost:5432/testdb?sslmode=disable
+          CLAUDE_API_KEY: test-key
+          GEMINI_API_KEY: test-key
+        run: |
+          go test -v -tags=e2e -timeout=10m ./test/e2e/...
+
+  # Phase 5: Performance Benchmarks
+  benchmarks:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    if: github.event_name == 'schedule' || contains(github.event.head_commit.message, '[benchmark]')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run benchmarks
+        run: |
+          mkdir -p benchmarks
+          go test -bench=. -benchmem -benchtime=30s -run=^$ ./... | tee benchmarks/results.txt
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: benchmarks/
+
+  # Phase 6: Security Scanning
+  security:
+    name: Security Scanning
+    runs-on: ubuntu-latest
+    needs: code-quality
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run Gosec Security Scanner
+        uses: securecodewarrior/github-action-gosec@master
+        with:
+          args: '-fmt sarif -out gosec.sarif ./...'
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gosec.sarif
+
+  # Phase 7: Combined Coverage Report
+  combined-coverage:
+    name: Combined Coverage Report
+    runs-on: ubuntu-latest
+    needs: [unit-tests, integration-tests]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download unit coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: unit-coverage
+          path: coverage/
+
+      - name: Download integration coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: integration-coverage
+          path: coverage/
+
+      - name: Combine coverage reports
+        run: |
+          echo "mode: atomic" > coverage/combined.out
+          tail -n +2 coverage/unit.out >> coverage/combined.out
+          tail -n +2 coverage/integration.out >> coverage/combined.out
+          go tool cover -html=coverage/combined.out -o coverage/combined.html
+          go tool cover -func=coverage/combined.out | grep total | awk '{print $3}' | sed 's/%//' > coverage/combined-percentage.txt
+
+      - name: Check combined coverage
+        run: |
+          COVERAGE=$(cat coverage/combined-percentage.txt)
+          echo "Combined coverage: ${COVERAGE}%"
+          if (( $(echo "$COVERAGE < ${{ env.COVERAGE_THRESHOLD }}" | bc -l) )); then
+            echo "Combined coverage ${COVERAGE}% is below threshold ${{ env.COVERAGE_THRESHOLD }}%"
+            exit 1
+          fi
+
+      - name: Upload combined coverage
+        uses: codecov/codecov-action@v4
+        with:
+          file: coverage/combined.out
+          flags: combined
+          name: combined-coverage
+
+      - name: Upload combined artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: combined-coverage
+          path: coverage/

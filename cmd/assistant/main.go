@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
+	_ "net/http/pprof" // Enable pprof endpoints
 	"os"
 	"os/signal"
 	"syscall"
@@ -118,6 +120,13 @@ func main() {
 		}
 	}
 
+	// Initialize performance profiling manager (golang_guide.md recommendation)
+	profileManager := observability.NewProfileManager(logger)
+	if cfg.Mode == "production" || os.Getenv("ENABLE_PROFILING") == "true" {
+		profileManager.EnableProfiling(time.Minute * 10) // Profile every 10 minutes in production
+		profileManager.StartPeriodicProfiling(ctx)
+	}
+
 	// Initialize assistant core
 	assistantCore, err := assistant.New(ctx, cfg, db, logger)
 	if err != nil {
@@ -151,6 +160,20 @@ func main() {
 }
 
 func runWebServer(ctx context.Context, cfg *config.Config, assistant *assistant.Assistant, logger *slog.Logger, sigChan chan os.Signal) {
+	// Start pprof server for performance profiling (golang_guide.md recommendation)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("pprof server panicked", slog.Any("panic", r))
+			}
+		}()
+
+		logger.Info("Starting pprof server", slog.String("address", "localhost:6060"))
+		if err := http.ListenAndServe("localhost:6060", nil); err != nil {
+			logger.Warn("pprof server failed", slog.Any("error", err))
+		}
+	}()
+
 	// Initialize web server
 	srv, err := server.New(cfg.Server, assistant, logger)
 	if err != nil {
@@ -160,6 +183,15 @@ func runWebServer(ctx context.Context, cfg *config.Config, assistant *assistant.
 
 	// Start server in goroutine
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				logger.Error("HTTP server goroutine panicked",
+					slog.Any("panic", r),
+					slog.String("address", cfg.Server.Address))
+				os.Exit(1)
+			}
+		}()
+
 		logger.Info("Starting web server", slog.String("address", cfg.Server.Address))
 		if err := srv.Start(ctx); err != nil {
 			logger.Error("Server failed to start", slog.Any("error", err))

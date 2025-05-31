@@ -82,6 +82,7 @@ type EmbeddingRecord struct {
 	Embedding   []float64              `json:"embedding"`
 	Metadata    map[string]interface{} `json:"metadata"`
 	CreatedAt   time.Time              `json:"created_at"`
+	UpdatedAt   *time.Time             `json:"updated_at,omitempty"`
 }
 
 // EmbeddingSearchResult represents a similarity search result

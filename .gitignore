@@ -63,7 +63,17 @@ configs/local.yaml
 
 # Assistant-specific
 .assistant_history
+.goassistant_history*
 /assistant
+
+# Demo and validation scripts (not for public repo)
+demo_cli.sh
+scripts/test-demo.sh
+scripts/validate-implementation.sh
 
 # Local documentation (not for public repo)
 **/README.zh-Hant.md
+
+# Profiling files
+*.pprof
+default.pgo
