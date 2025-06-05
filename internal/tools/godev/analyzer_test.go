@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/koopa0/assistant-go/internal/tools"
 )
 
 // TestGoAnalyzerBasics tests basic analyzer functionality
@@ -33,21 +35,16 @@ func TestGoAnalyzerBasics(t *testing.T) {
 	}
 
 	// Check required parameters
-	properties, ok := params["properties"].(map[string]interface{})
-	if !ok {
+	if params.Properties == nil {
 		t.Error("Parameters should have properties")
+		return
 	}
 
-	if _, exists := properties["path"]; !exists {
+	if _, exists := params.Properties["path"]; !exists {
 		t.Error("Parameters should include 'path' property")
 	}
 
-	required, ok := params["required"].([]string)
-	if !ok {
-		t.Error("Parameters should have required array")
-	}
-
-	if len(required) == 0 || required[0] != "path" {
+	if len(params.Required) == 0 || params.Required[0] != "path" {
 		t.Error("'path' should be required parameter")
 	}
 }
@@ -94,31 +91,31 @@ func TestGoAnalyzerValidation(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		input     map[string]interface{}
+		input     *tools.ToolInput
 		wantError bool
 		errorMsg  string
 	}{
 		{
 			name:      "missing_path",
-			input:     map[string]interface{}{},
+			input:     &tools.ToolInput{Parameters: map[string]interface{}{}},
 			wantError: true,
 			errorMsg:  "path parameter is required",
 		},
 		{
 			name:      "empty_path",
-			input:     map[string]interface{}{"path": ""},
+			input:     &tools.ToolInput{Parameters: map[string]interface{}{"path": ""}},
 			wantError: true,
 			errorMsg:  "path parameter is required",
 		},
 		{
 			name:      "invalid_path_type",
-			input:     map[string]interface{}{"path": 123},
+			input:     &tools.ToolInput{Parameters: map[string]interface{}{"path": 123}},
 			wantError: true,
 			errorMsg:  "path parameter is required",
 		},
 		{
 			name:      "nonexistent_path",
-			input:     map[string]interface{}{"path": "/nonexistent/path"},
+			input:     &tools.ToolInput{Parameters: map[string]interface{}{"path": "/nonexistent/path"}},
 			wantError: true,
 		},
 	}

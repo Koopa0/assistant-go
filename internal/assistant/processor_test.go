@@ -17,7 +17,7 @@ func TestProcessorCreation(t *testing.T) {
 	tests := []struct {
 		name        string
 		cfg         *config.Config
-		db          postgres.ClientInterface
+		db          postgres.DB
 		registry    *tools.Registry
 		expectError bool
 		errorType   string

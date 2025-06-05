@@ -23,10 +23,18 @@ type GoAnalyzer struct {
 }
 
 // NewGoAnalyzer creates a new Go analyzer tool
-func NewGoAnalyzer(config map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+func NewGoAnalyzer(config *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
+	// Convert ToolConfig to legacy map format for now
+	legacyConfig := make(map[string]interface{})
+	if config != nil {
+		legacyConfig["timeout"] = config.Timeout
+		legacyConfig["debug"] = config.Debug
+		legacyConfig["working_dir"] = config.WorkingDir
+	}
+
 	return &GoAnalyzer{
 		logger: logger,
-		config: config,
+		config: legacyConfig,
 	}, nil
 }
 
@@ -41,42 +49,42 @@ func (g *GoAnalyzer) Description() string {
 }
 
 // Parameters returns the tool parameters schema
-func (g *GoAnalyzer) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"path": map[string]interface{}{
-				"type":        "string",
-				"description": "Path to Go file or directory to analyze",
-				"required":    true,
+func (g *GoAnalyzer) Parameters() *tools.ToolParametersSchema {
+	return &tools.ToolParametersSchema{
+		Type: "object",
+		Properties: map[string]tools.ToolParameter{
+			"path": {
+				Type:        "string",
+				Description: "Path to Go file or directory to analyze",
+				Required:    true,
 			},
-			"analysis_type": map[string]interface{}{
-				"type":        "string",
-				"description": "Type of analysis to perform",
-				"enum":        []string{"structure", "complexity", "issues", "all"},
-				"default":     "all",
+			"analysis_type": {
+				Type:        "string",
+				Description: "Type of analysis to perform",
+				Enum:        []string{"structure", "complexity", "issues", "all"},
+				Default:     "all",
 			},
-			"recursive": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Recursively analyze subdirectories",
-				"default":     true,
+			"recursive": {
+				Type:        "boolean",
+				Description: "Recursively analyze subdirectories",
+				Default:     true,
 			},
-			"include_tests": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Include test files in analysis",
-				"default":     true,
+			"include_tests": {
+				Type:        "boolean",
+				Description: "Include test files in analysis",
+				Default:     true,
 			},
 		},
-		"required": []string{"path"},
+		Required: []string{"path"},
 	}
 }
 
 // Execute executes the Go analyzer
-func (g *GoAnalyzer) Execute(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+func (g *GoAnalyzer) Execute(ctx context.Context, input *tools.ToolInput) (*tools.ToolResult, error) {
 	startTime := time.Now()
 
 	// Parse input parameters
-	path, ok := input["path"].(string)
+	path, ok := input.Parameters["path"].(string)
 	if !ok || path == "" {
 		return &tools.ToolResult{
 			Success: false,
@@ -85,17 +93,17 @@ func (g *GoAnalyzer) Execute(ctx context.Context, input map[string]interface{}) 
 	}
 
 	analysisType := "all"
-	if at, ok := input["analysis_type"].(string); ok {
+	if at, ok := input.Parameters["analysis_type"].(string); ok {
 		analysisType = at
 	}
 
 	recursive := true
-	if r, ok := input["recursive"].(bool); ok {
+	if r, ok := input.Parameters["recursive"].(bool); ok {
 		recursive = r
 	}
 
 	includeTests := true
-	if it, ok := input["include_tests"].(bool); ok {
+	if it, ok := input.Parameters["include_tests"].(bool); ok {
 		includeTests = it
 	}
 
@@ -115,16 +123,33 @@ func (g *GoAnalyzer) Execute(ctx context.Context, input map[string]interface{}) 
 		}, err
 	}
 
-	return &tools.ToolResult{
-		Success: true,
-		Data:    result,
-		Metadata: map[string]interface{}{
-			"analysis_type":  analysisType,
-			"path":           path,
-			"recursive":      recursive,
-			"include_tests":  includeTests,
-			"execution_time": time.Since(startTime).String(),
+	// Convert AnalysisResult to ToolResultData
+	toolData := &tools.ToolResultData{
+		Analysis: &tools.AnalysisResult{
+			Issues:  convertGoIssuesToToolIssues(result.Issues),
+			Metrics: convertGoMetricsToToolMetrics(result.Metrics),
+			// TODO: Add dependencies and test coverage conversion
 		},
+		LinesProcessed: int64(result.Summary.TotalLines),
+	}
+
+	// Create metadata
+	metadata := &tools.ToolMetadata{
+		StartTime:     startTime,
+		EndTime:       time.Now(),
+		ExecutionTime: time.Since(startTime),
+		Parameters: map[string]string{
+			"analysis_type": analysisType,
+			"path":          path,
+			"recursive":     fmt.Sprintf("%t", recursive),
+			"include_tests": fmt.Sprintf("%t", includeTests),
+		},
+	}
+
+	return &tools.ToolResult{
+		Success:       true,
+		Data:          toolData,
+		Metadata:      metadata,
 		ExecutionTime: time.Since(startTime),
 	}, nil
 }
@@ -1236,5 +1261,36 @@ func (g *GoAnalyzer) analyzeDependencies(projectPath string, result *AnalysisRes
 		} else {
 			result.Dependencies.DependencyHealth[dep] = "ok"
 		}
+	}
+}
+
+// convertGoIssuesToToolIssues converts Go analyzer issues to tool issues
+func convertGoIssuesToToolIssues(goIssues []CodeIssue) []tools.Issue {
+	issues := make([]tools.Issue, 0, len(goIssues))
+	for _, issue := range goIssues {
+		toolIssue := tools.Issue{
+			Type:        string(issue.Type),
+			Severity:    string(issue.Severity),
+			Message:     issue.Message,
+			File:        issue.File,
+			Line:        issue.Line,
+			Column:      issue.Column,
+			Rule:        issue.Rule,
+			Suggestions: []string{issue.Suggestion}, // Convert single suggestion to slice
+		}
+		issues = append(issues, toolIssue)
+	}
+	return issues
+}
+
+// convertGoMetricsToToolMetrics converts Go metrics to tool metrics
+func convertGoMetricsToToolMetrics(goMetrics ProjectMetrics) *tools.CodeMetrics {
+	return &tools.CodeMetrics{
+		LinesOfCode:          0,                                // ProjectMetrics doesn't have TotalLines
+		CyclomaticComplexity: int(goMetrics.AverageComplexity), // Convert float64 to int
+		CognitiveComplexity:  goMetrics.MaxComplexity,
+		TestCoveragePercent:  goMetrics.TestToCodeRatio * 100,              // Use TestToCodeRatio
+		DuplicationPercent:   goMetrics.DuplicationRate * 100,              // Use DuplicationRate
+		TechnicalDebt:        fmt.Sprintf("%.2f", goMetrics.TechnicalDebt), // Use TechnicalDebt
 	}
 }

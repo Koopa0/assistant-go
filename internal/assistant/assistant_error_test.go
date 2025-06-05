@@ -621,7 +621,7 @@ func TestEdgeCases(t *testing.T) {
 		specialQueries := []string{
 			"\x00\x01\x02",             // Control characters
 			"🚀🔥💻",                      // Emojis
-			"测试中文查询",                   // Chinese characters
+			"測試中文查詢",                   // Chinese characters
 			"مرحبا بالعالم",            // Arabic characters
 			"\n\r\t",                   // Whitespace characters
 			string([]byte{0xFF, 0xFE}), // Invalid UTF-8

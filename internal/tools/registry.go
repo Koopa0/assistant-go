@@ -17,10 +17,10 @@ type Tool interface {
 	Description() string
 
 	// Parameters returns the tool parameters schema
-	Parameters() map[string]interface{}
+	Parameters() *ToolParametersSchema
 
 	// Execute executes the tool with the given input
-	Execute(ctx context.Context, input map[string]interface{}) (*ToolResult, error)
+	Execute(ctx context.Context, input *ToolInput) (*ToolResult, error)
 
 	// Health checks if the tool is healthy
 	Health(ctx context.Context) error
@@ -31,26 +31,26 @@ type Tool interface {
 
 // ToolResult represents the result of a tool execution
 type ToolResult struct {
-	Success       bool                   `json:"success"`
-	Data          interface{}            `json:"data,omitempty"`
-	Error         string                 `json:"error,omitempty"`
-	Metadata      map[string]interface{} `json:"metadata,omitempty"`
-	ExecutionTime time.Duration          `json:"execution_time"`
+	Success       bool            `json:"success"`
+	Data          *ToolResultData `json:"data,omitempty"`
+	Error         string          `json:"error,omitempty"`
+	Metadata      *ToolMetadata   `json:"metadata,omitempty"`
+	ExecutionTime time.Duration   `json:"execution_time"`
 }
 
 // ToolInfo represents information about a tool
 type ToolInfo struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
-	Category    string                 `json:"category"`
-	Version     string                 `json:"version"`
-	Author      string                 `json:"author"`
-	IsEnabled   bool                   `json:"is_enabled"`
+	Name        string                `json:"name"`
+	Description string                `json:"description"`
+	Parameters  *ToolParametersSchema `json:"parameters"`
+	Category    string                `json:"category"`
+	Version     string                `json:"version"`
+	Author      string                `json:"author"`
+	IsEnabled   bool                  `json:"is_enabled"`
 }
 
 // ToolFactory is a function that creates a new tool instance
-type ToolFactory func(config map[string]interface{}, logger *slog.Logger) (Tool, error)
+type ToolFactory func(config *ToolConfig, logger *slog.Logger) (Tool, error)
 
 // Registry manages tool registration and execution
 type Registry struct {
@@ -117,7 +117,7 @@ func (r *Registry) Unregister(name string) error {
 }
 
 // GetTool gets or creates a tool instance
-func (r *Registry) GetTool(name string, config map[string]interface{}) (Tool, error) {
+func (r *Registry) GetTool(name string, config *ToolConfig) (Tool, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -132,8 +132,23 @@ func (r *Registry) GetTool(name string, config map[string]interface{}) (Tool, er
 		return nil, fmt.Errorf("tool %s is not registered", name)
 	}
 
-	// Create new instance
-	tool, err := factory(config, r.logger)
+	// Use default config if none provided
+	if config == nil {
+		config = &ToolConfig{}
+	}
+
+	// Create new instance with panic recovery
+	var tool Tool
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("tool factory panic: %v", r)
+			}
+		}()
+		tool, err = factory(config, r.logger)
+	}()
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tool %s: %w", name, err)
 	}
@@ -157,7 +172,7 @@ func (r *Registry) GetTool(name string, config map[string]interface{}) (Tool, er
 }
 
 // Execute executes a tool with the given input
-func (r *Registry) Execute(ctx context.Context, name string, input map[string]interface{}, config map[string]interface{}) (*ToolResult, error) {
+func (r *Registry) Execute(ctx context.Context, name string, input *ToolInput, config *ToolConfig) (*ToolResult, error) {
 	startTime := time.Now()
 
 	tool, err := r.GetTool(name, config)
@@ -169,9 +184,17 @@ func (r *Registry) Execute(ctx context.Context, name string, input map[string]in
 		}, err
 	}
 
+	// Ensure input is not nil
+	if input == nil {
+		input = &ToolInput{
+			Parameters: make(map[string]interface{}),
+		}
+	}
+
 	r.logger.Debug("Executing tool",
 		slog.String("tool", name),
-		slog.Any("input", input))
+		slog.String("task_description", input.TaskDescription),
+		slog.String("context", input.Context))
 
 	result, err := tool.Execute(ctx, input)
 	if err != nil {
@@ -229,11 +252,15 @@ func (r *Registry) ListTools() []ToolInfo {
 			tools = append(tools, ToolInfo{
 				Name:        name,
 				Description: "Tool description not available",
-				Parameters:  make(map[string]interface{}),
-				Category:    r.getToolCategory(name),
-				Version:     "1.0.0",
-				Author:      "GoAssistant",
-				IsEnabled:   true,
+				Parameters: &ToolParametersSchema{
+					Type:       "object",
+					Properties: make(map[string]ToolParameter),
+					Required:   []string{},
+				},
+				Category:  r.getToolCategory(name),
+				Version:   "1.0.0",
+				Author:    "GoAssistant",
+				IsEnabled: true,
 			})
 		}
 	}
@@ -255,11 +282,15 @@ func (r *Registry) GetToolInfo(name string) (*ToolInfo, error) {
 		info := ToolInfo{
 			Name:        name,
 			Description: "Tool description not available",
-			Parameters:  make(map[string]interface{}),
-			Category:    r.getToolCategory(name),
-			Version:     "1.0.0",
-			Author:      "GoAssistant",
-			IsEnabled:   true,
+			Parameters: &ToolParametersSchema{
+				Type:       "object",
+				Properties: make(map[string]ToolParameter),
+				Required:   []string{},
+			},
+			Category:  r.getToolCategory(name),
+			Version:   "1.0.0",
+			Author:    "GoAssistant",
+			IsEnabled: true,
 		}
 		return &info, nil
 	}
@@ -286,25 +317,40 @@ func (r *Registry) Health(ctx context.Context) error {
 }
 
 // Stats returns registry statistics
-func (r *Registry) Stats(ctx context.Context) (map[string]interface{}, error) {
+func (r *Registry) Stats(ctx context.Context) (*RegistryStats, error) {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
-	stats := map[string]interface{}{
-		"registered_factories": len(r.factories),
-		"active_instances":     len(r.tools),
-		"tools":                make(map[string]interface{}),
-	}
+	toolStats := make(map[string]*ToolStats)
+	activeCount := 0
 
-	// Add per-tool statistics
-	toolStats := make(map[string]interface{})
 	for name := range r.factories {
-		toolStats[name] = map[string]interface{}{
-			"is_instantiated": r.tools[name] != nil,
-			"category":        r.getToolCategory(name),
+		isActive := r.tools[name] != nil
+		if isActive {
+			activeCount++
+		}
+
+		toolStats[name] = &ToolStats{
+			Name:           name,
+			ExecutionCount: 0,           // TODO: Implement execution tracking
+			SuccessCount:   0,           // TODO: Implement success tracking
+			ErrorCount:     0,           // TODO: Implement error tracking
+			SuccessRate:    1.0,         // Default to 100% until tracking is implemented
+			AverageTime:    0,           // TODO: Implement timing tracking
+			LastExecuted:   time.Time{}, // TODO: Implement execution tracking
 		}
 	}
-	stats["tools"] = toolStats
+
+	stats := &RegistryStats{
+		RegisteredTools:    len(r.factories),
+		ActiveTools:        activeCount,
+		TotalExecutions:    0,   // TODO: Implement tracking
+		TotalSuccesses:     0,   // TODO: Implement tracking
+		TotalErrors:        0,   // TODO: Implement tracking
+		OverallSuccessRate: 1.0, // Default until tracking is implemented
+		ToolStats:          toolStats,
+		Uptime:             time.Since(time.Now()), // TODO: Track actual uptime
+	}
 
 	return stats, nil
 }
@@ -353,4 +399,58 @@ func (r *Registry) getToolCategory(name string) string {
 	default:
 		return "general"
 	}
+}
+
+// LEGACY COMPATIBILITY METHODS
+// These methods provide backward compatibility with existing code that uses map[string]interface{}
+
+// ExecuteLegacy executes a tool with legacy map[string]interface{} input for backward compatibility
+func (r *Registry) ExecuteLegacy(ctx context.Context, name string, input map[string]interface{}, config map[string]interface{}) (*ToolResult, error) {
+	// Convert legacy input and config to new types
+	toolInput := ConvertLegacyInput(input)
+	toolConfig := ConvertLegacyConfig(config)
+
+	return r.Execute(ctx, name, toolInput, toolConfig)
+}
+
+// GetToolLegacy gets a tool with legacy map[string]interface{} config for backward compatibility
+func (r *Registry) GetToolLegacy(name string, config map[string]interface{}) (Tool, error) {
+	toolConfig := ConvertLegacyConfig(config)
+	return r.GetTool(name, toolConfig)
+}
+
+// StatsLegacy returns registry statistics in legacy map[string]interface{} format for backward compatibility
+func (r *Registry) StatsLegacy(ctx context.Context) (map[string]interface{}, error) {
+	stats, err := r.Stats(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to legacy format
+	legacyStats := map[string]interface{}{
+		"registered_factories": stats.RegisteredTools,
+		"active_instances":     stats.ActiveTools,
+		"total_executions":     stats.TotalExecutions,
+		"total_successes":      stats.TotalSuccesses,
+		"total_errors":         stats.TotalErrors,
+		"success_rate":         stats.OverallSuccessRate,
+		"uptime":               stats.Uptime.String(),
+		"tools":                make(map[string]interface{}),
+	}
+
+	// Convert tool stats
+	toolStats := make(map[string]interface{})
+	for name, stat := range stats.ToolStats {
+		toolStats[name] = map[string]interface{}{
+			"execution_count": stat.ExecutionCount,
+			"success_count":   stat.SuccessCount,
+			"error_count":     stat.ErrorCount,
+			"success_rate":    stat.SuccessRate,
+			"average_time":    stat.AverageTime.String(),
+			"last_executed":   stat.LastExecuted,
+		}
+	}
+	legacyStats["tools"] = toolStats
+
+	return legacyStats, nil
 }

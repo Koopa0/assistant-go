@@ -5,6 +5,7 @@ sql:
     schema:
       - "internal/storage/postgres/migrations/001_initial_schema.up.sql"
       - "internal/storage/postgres/migrations/002_langchain_extensions.up.sql"
+      - "internal/storage/postgres/migrations/003_intelligent_features.up.sql"
     gen:
       go:
         package: "sqlc"
@@ -30,4 +31,7 @@ sql:
           - column: "*.metadata"
             go_type: "encoding/json.RawMessage"
           - column: "*.embedding"
-            go_type: "string"
+            go_type:
+              import: "github.com/pgvector/pgvector-go"
+              package: "pgvector"
+              type: "Vector"

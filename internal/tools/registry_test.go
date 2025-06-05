@@ -37,7 +37,7 @@ func TestRegistryRegister(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	registry := NewRegistry(logger)
 
-	factory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	factory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return &testTool{name: "test_tool"}, nil
 	}
 
@@ -113,7 +113,7 @@ func TestRegistryUnregister(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	registry := NewRegistry(logger)
 
-	factory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	factory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return &testTool{name: "test_tool"}, nil
 	}
 
@@ -157,11 +157,11 @@ func TestRegistryGetTool(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	registry := NewRegistry(logger)
 
-	successFactory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
-		return &testTool{name: "success_tool", config: config}, nil
+	successFactory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
+		return &testTool{name: "success_tool", config: map[string]interface{}{"timeout": config.Timeout}}, nil
 	}
 
-	failureFactory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	failureFactory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return nil, errors.New("factory error")
 	}
 
@@ -172,14 +172,14 @@ func TestRegistryGetTool(t *testing.T) {
 	tests := []struct {
 		name      string
 		toolName  string
-		config    map[string]interface{}
+		config    *ToolConfig
 		wantError bool
 		errorMsg  string
 	}{
 		{
 			name:     "successful_creation",
 			toolName: "success_tool",
-			config:   map[string]interface{}{"key": "value"},
+			config:   &ToolConfig{WorkingDir: "/test"},
 		},
 		{
 			name:      "unregistered_tool",
@@ -235,21 +235,21 @@ func TestRegistryExecute(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	registry := NewRegistry(logger)
 
-	successFactory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	successFactory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return &testTool{
 			name:          "success_tool",
-			executeResult: &ToolResult{Success: true, Data: "test result"},
+			executeResult: &ToolResult{Success: true, Data: &ToolResultData{Output: "test result"}},
 		}, nil
 	}
 
-	errorFactory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	errorFactory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return &testTool{
 			name:       "error_tool",
 			executeErr: errors.New("execution error"),
 		}, nil
 	}
 
-	nilResultFactory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	nilResultFactory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return &testTool{name: "nil_result_tool"}, nil
 	}
 
@@ -259,15 +259,15 @@ func TestRegistryExecute(t *testing.T) {
 	_ = registry.Register("nil_result_tool", nilResultFactory)
 
 	ctx := context.Background()
-	input := map[string]interface{}{"test": "input"}
-	config := map[string]interface{}{"config": "value"}
+	input := &ToolInput{Parameters: map[string]interface{}{"test": "input"}}
+	config := &ToolConfig{WorkingDir: "/test"}
 
 	tests := []struct {
 		name        string
 		toolName    string
 		wantSuccess bool
 		wantError   bool
-		wantData    interface{}
+		wantData    string
 	}{
 		{
 			name:        "successful_execution",
@@ -313,8 +313,8 @@ func TestRegistryExecute(t *testing.T) {
 				if result.Success != tt.wantSuccess {
 					t.Errorf("Execute() Success = %v, want %v", result.Success, tt.wantSuccess)
 				}
-				if tt.wantData != nil && result.Data != tt.wantData {
-					t.Errorf("Execute() Data = %v, want %v", result.Data, tt.wantData)
+				if tt.wantData != "" && result.Data != nil && result.Data.Output != tt.wantData {
+					t.Errorf("Execute() Data = %v, want %v", result.Data.Output, tt.wantData)
 				}
 				if result.ExecutionTime <= 0 {
 					t.Error("Execute() should set execution time")
@@ -329,10 +329,10 @@ func TestRegistryListTools(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	registry := NewRegistry(logger)
 
-	factory1 := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	factory1 := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return &testTool{name: "tool1", description: "Tool 1"}, nil
 	}
-	factory2 := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	factory2 := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return &testTool{name: "tool2", description: "Tool 2"}, nil
 	}
 
@@ -386,7 +386,7 @@ func TestRegistryGetToolInfo(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	registry := NewRegistry(logger)
 
-	factory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	factory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return &testTool{name: "test_tool", description: "Test tool description"}, nil
 	}
 
@@ -449,11 +449,11 @@ func TestRegistryHealth(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	registry := NewRegistry(logger)
 
-	healthyFactory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	healthyFactory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return &testTool{name: "healthy_tool"}, nil
 	}
 
-	unhealthyFactory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	unhealthyFactory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return &testTool{name: "unhealthy_tool", healthErr: errors.New("health check failed")}, nil
 	}
 
@@ -495,7 +495,7 @@ func TestRegistryStats(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	registry := NewRegistry(logger)
 
-	factory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	factory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return &testTool{name: "test_tool"}, nil
 	}
 
@@ -552,11 +552,11 @@ func TestRegistryClose(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	registry := NewRegistry(logger)
 
-	normalFactory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	normalFactory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return &testTool{name: "normal_tool"}, nil
 	}
 
-	errorCloseFactory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	errorCloseFactory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return &testTool{name: "error_close_tool", closeErr: errors.New("close error")}, nil
 	}
 
@@ -592,7 +592,7 @@ func TestRegistryConcurrency(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	registry := NewRegistry(logger)
 
-	factory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	factory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return &testTool{name: "concurrent_tool"}, nil
 	}
 
@@ -628,7 +628,7 @@ func TestRegistryConcurrency(t *testing.T) {
 	// Test concurrent execution
 	t.Run("concurrent_execution", func(t *testing.T) {
 		ctx := context.Background()
-		input := map[string]interface{}{"test": "input"}
+		input := &ToolInput{Parameters: map[string]interface{}{"test": "input"}}
 
 		for i := 0; i < numGoroutines; i++ {
 			wg.Add(1)
@@ -681,7 +681,7 @@ func BenchmarkRegistry(b *testing.B) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	registry := NewRegistry(logger)
 
-	factory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+	factory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 		return &testTool{name: "bench_tool"}, nil
 	}
 
@@ -695,7 +695,7 @@ func BenchmarkRegistry(b *testing.B) {
 
 	b.Run("Execute", func(b *testing.B) {
 		ctx := context.Background()
-		input := map[string]interface{}{"test": "input"}
+		input := &ToolInput{Parameters: map[string]interface{}{"test": "input"}}
 
 		for i := 0; i < b.N; i++ {
 			_, _ = registry.Execute(ctx, "bench_tool", input, nil)
@@ -740,22 +740,22 @@ func (t *testTool) Description() string {
 	return t.description
 }
 
-func (t *testTool) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type":       "object",
-		"properties": map[string]interface{}{},
-		"required":   []string{},
+func (t *testTool) Parameters() *ToolParametersSchema {
+	return &ToolParametersSchema{
+		Type:       "object",
+		Properties: map[string]ToolParameter{},
+		Required:   []string{},
 	}
 }
 
-func (t *testTool) Execute(ctx context.Context, input map[string]interface{}) (*ToolResult, error) {
+func (t *testTool) Execute(ctx context.Context, input *ToolInput) (*ToolResult, error) {
 	if t.executeErr != nil {
 		return nil, t.executeErr
 	}
 	if t.executeResult != nil {
 		return t.executeResult, nil
 	}
-	return &ToolResult{Success: true, Data: "test result"}, nil
+	return &ToolResult{Success: true, Data: &ToolResultData{Output: "test result"}}, nil
 }
 
 func (t *testTool) Health(ctx context.Context) error {
@@ -772,7 +772,7 @@ func TestRegistryEdgeCases(t *testing.T) {
 	registry := NewRegistry(logger)
 
 	t.Run("execute_with_cancelled_context", func(t *testing.T) {
-		factory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+		factory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 			return &slowTool{}, nil
 		}
 		_ = registry.Register("slow_tool", factory)
@@ -790,7 +790,7 @@ func TestRegistryEdgeCases(t *testing.T) {
 	})
 
 	t.Run("tool_factory_panic_recovery", func(t *testing.T) {
-		panicFactory := func(config map[string]interface{}, logger *slog.Logger) (Tool, error) {
+		panicFactory := func(config *ToolConfig, logger *slog.Logger) (Tool, error) {
 			panic("factory panic")
 		}
 		_ = registry.Register("panic_tool", panicFactory)
@@ -811,10 +811,10 @@ type slowTool struct{}
 
 func (s *slowTool) Name() string        { return "slow_tool" }
 func (s *slowTool) Description() string { return "Slow tool" }
-func (s *slowTool) Parameters() map[string]interface{} {
-	return map[string]interface{}{"type": "object"}
+func (s *slowTool) Parameters() *ToolParametersSchema {
+	return &ToolParametersSchema{Type: "object", Properties: map[string]ToolParameter{}, Required: []string{}}
 }
-func (s *slowTool) Execute(ctx context.Context, input map[string]interface{}) (*ToolResult, error) {
+func (s *slowTool) Execute(ctx context.Context, input *ToolInput) (*ToolResult, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()

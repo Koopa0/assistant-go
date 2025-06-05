@@ -21,10 +21,18 @@ type GoDependencyAnalyzer struct {
 }
 
 // NewGoDependencyAnalyzer creates a new Go dependency analyzer tool
-func NewGoDependencyAnalyzer(config map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+func NewGoDependencyAnalyzer(config *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
+	// Convert ToolConfig to legacy map format for now
+	legacyConfig := make(map[string]interface{})
+	if config != nil {
+		legacyConfig["timeout"] = config.Timeout
+		legacyConfig["debug"] = config.Debug
+		legacyConfig["working_dir"] = config.WorkingDir
+	}
+
 	return &GoDependencyAnalyzer{
 		logger: logger,
-		config: config,
+		config: legacyConfig,
 	}, nil
 }
 
@@ -39,87 +47,87 @@ func (g *GoDependencyAnalyzer) Description() string {
 }
 
 // Parameters returns the tool parameters schema
-func (g *GoDependencyAnalyzer) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"path": map[string]interface{}{
-				"type":        "string",
-				"description": "Path to the Go module directory",
-				"default":     ".",
+func (g *GoDependencyAnalyzer) Parameters() *tools.ToolParametersSchema {
+	return &tools.ToolParametersSchema{
+		Type: "object",
+		Properties: map[string]tools.ToolParameter{
+			"path": {
+				Type:        "string",
+				Description: "Path to the Go module directory",
+				Default:     ".",
 			},
-			"include_indirect": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Include indirect dependencies",
-				"default":     true,
+			"include_indirect": {
+				Type:        "boolean",
+				Description: "Include indirect dependencies",
+				Default:     true,
 			},
-			"include_test": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Include test dependencies",
-				"default":     false,
+			"include_test": {
+				Type:        "boolean",
+				Description: "Include test dependencies",
+				Default:     false,
 			},
-			"check_updates": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Check for available updates",
-				"default":     false,
+			"check_updates": {
+				Type:        "boolean",
+				Description: "Check for available updates",
+				Default:     false,
 			},
-			"analyze_vulnerabilities": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Analyze for known vulnerabilities",
-				"default":     false,
+			"analyze_vulnerabilities": {
+				Type:        "boolean",
+				Description: "Analyze for known vulnerabilities",
+				Default:     false,
 			},
-			"dependency_graph": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Generate dependency graph",
-				"default":     false,
+			"dependency_graph": {
+				Type:        "boolean",
+				Description: "Generate dependency graph",
+				Default:     false,
 			},
-			"license_analysis": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Analyze dependency licenses",
-				"default":     false,
+			"license_analysis": {
+				Type:        "boolean",
+				Description: "Analyze dependency licenses",
+				Default:     false,
 			},
 		},
-		"required": []string{},
+		Required: []string{},
 	}
 }
 
 // Execute executes the Go dependency analyzer
-func (g *GoDependencyAnalyzer) Execute(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+func (g *GoDependencyAnalyzer) Execute(ctx context.Context, input *tools.ToolInput) (*tools.ToolResult, error) {
 	startTime := time.Now()
 
 	// Parse input parameters
 	path := "."
-	if p, ok := input["path"].(string); ok && p != "" {
+	if p, ok := input.Parameters["path"].(string); ok && p != "" {
 		path = p
 	}
 
 	includeIndirect := true
-	if ii, ok := input["include_indirect"].(bool); ok {
+	if ii, ok := input.Parameters["include_indirect"].(bool); ok {
 		includeIndirect = ii
 	}
 
 	includeTest := false
-	if it, ok := input["include_test"].(bool); ok {
+	if it, ok := input.Parameters["include_test"].(bool); ok {
 		includeTest = it
 	}
 
 	checkUpdates := false
-	if cu, ok := input["check_updates"].(bool); ok {
+	if cu, ok := input.Parameters["check_updates"].(bool); ok {
 		checkUpdates = cu
 	}
 
 	analyzeVulnerabilities := false
-	if av, ok := input["analyze_vulnerabilities"].(bool); ok {
+	if av, ok := input.Parameters["analyze_vulnerabilities"].(bool); ok {
 		analyzeVulnerabilities = av
 	}
 
 	dependencyGraph := false
-	if dg, ok := input["dependency_graph"].(bool); ok {
+	if dg, ok := input.Parameters["dependency_graph"].(bool); ok {
 		dependencyGraph = dg
 	}
 
 	licenseAnalysis := false
-	if la, ok := input["license_analysis"].(bool); ok {
+	if la, ok := input.Parameters["license_analysis"].(bool); ok {
 		licenseAnalysis = la
 	}
 
@@ -133,27 +141,39 @@ func (g *GoDependencyAnalyzer) Execute(ctx context.Context, input map[string]int
 	result, err := g.analyzeDependencies(ctx, path, includeIndirect, includeTest,
 		checkUpdates, analyzeVulnerabilities, dependencyGraph, licenseAnalysis)
 	if err != nil {
+		// Convert DependencyAnalysisResult to ToolResultData even for errors
+		toolData := convertDependencyResultToToolData(result)
 		return &tools.ToolResult{
 			Success:       false,
 			Error:         err.Error(),
 			ExecutionTime: time.Since(startTime),
-			Data:          result,
+			Data:          toolData,
 		}, err
 	}
 
-	return &tools.ToolResult{
-		Success: true,
-		Data:    result,
-		Metadata: map[string]interface{}{
+	// Convert DependencyAnalysisResult to ToolResultData
+	toolData := convertDependencyResultToToolData(result)
+
+	// Create metadata
+	metadata := &tools.ToolMetadata{
+		StartTime:     startTime,
+		EndTime:       time.Now(),
+		ExecutionTime: time.Since(startTime),
+		Parameters: map[string]string{
 			"path":                    path,
-			"include_indirect":        includeIndirect,
-			"include_test":            includeTest,
-			"check_updates":           checkUpdates,
-			"analyze_vulnerabilities": analyzeVulnerabilities,
-			"dependency_graph":        dependencyGraph,
-			"license_analysis":        licenseAnalysis,
-			"execution_time":          time.Since(startTime).String(),
+			"include_indirect":        fmt.Sprintf("%t", includeIndirect),
+			"include_test":            fmt.Sprintf("%t", includeTest),
+			"check_updates":           fmt.Sprintf("%t", checkUpdates),
+			"analyze_vulnerabilities": fmt.Sprintf("%t", analyzeVulnerabilities),
+			"dependency_graph":        fmt.Sprintf("%t", dependencyGraph),
+			"license_analysis":        fmt.Sprintf("%t", licenseAnalysis),
 		},
+	}
+
+	return &tools.ToolResult{
+		Success:       true,
+		Data:          toolData,
+		Metadata:      metadata,
 		ExecutionTime: time.Since(startTime),
 	}, nil
 }
@@ -737,4 +757,51 @@ func (g *GoDependencyAnalyzer) generateRecommendations(result *DependencyAnalysi
 	}
 
 	return recommendations
+}
+
+// convertDependencyResultToToolData converts DependencyAnalysisResult to ToolResultData
+func convertDependencyResultToToolData(depResult *DependencyAnalysisResult) *tools.ToolResultData {
+	if depResult == nil {
+		return &tools.ToolResultData{}
+	}
+
+	// Convert dependencies to tools.Dependency format
+	dependencies := make([]tools.Dependency, 0, len(depResult.Dependencies))
+	for _, dep := range depResult.Dependencies {
+		dependencies = append(dependencies, tools.Dependency{
+			Name:    dep.Path,
+			Version: dep.Version,
+			Type: func() string {
+				if dep.Indirect {
+					return "indirect"
+				} else {
+					return "direct"
+				}
+			}(),
+			Source: "go.mod",
+		})
+	}
+
+	return &tools.ToolResultData{
+		Analysis: &tools.AnalysisResult{
+			Dependencies: dependencies,
+		},
+		LinesProcessed: int64(len(depResult.Dependencies)),
+		Results: []tools.ResultItem{
+			{
+				ID:   "dependency_summary",
+				Type: "summary",
+				Name: "Dependency Analysis Summary",
+				Description: fmt.Sprintf("Total: %d, Direct: %d, Indirect: %d",
+					depResult.Summary.TotalDependencies,
+					depResult.Summary.DirectDependencies,
+					depResult.Summary.IndirectDependencies),
+				Metadata: map[string]string{
+					"module_path":   depResult.ModuleInfo.Path,
+					"go_version":    depResult.ModuleInfo.GoVersion,
+					"analysis_time": depResult.AnalysisTime.String(),
+				},
+			},
+		},
+	}
 }

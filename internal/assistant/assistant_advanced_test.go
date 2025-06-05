@@ -1063,7 +1063,7 @@ func TestErrorPropagation(t *testing.T) {
 }
 
 type errorDB struct {
-	postgres.ClientInterface
+	postgres.DB
 	err error
 }
 

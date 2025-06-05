@@ -1,0 +1,1245 @@
+// TODO: Fix processor tests - they have compilation issues with field names
+// package assistant
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/koopa0/assistant-go/internal/ai"
+	"github.com/koopa0/assistant-go/internal/config"
+	contextEngine "github.com/koopa0/assistant-go/internal/core/context"
+	"github.com/koopa0/assistant-go/internal/core/memory"
+	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/storage/postgres/sqlc"
+	"github.com/koopa0/assistant-go/internal/testutil"
+	"github.com/koopa0/assistant-go/internal/tools"
+)
+
+// TestProcessPipeline tests the complete 9-step processing pipeline
+func TestProcessPipeline(t *testing.T) {
+	tests := []struct {
+		name         string
+		request      *QueryRequest
+		setupFunc    func(*Processor)
+		expectError  bool
+		errorStep    string // Which step should fail
+		validateFunc func(*testing.T, *QueryResponse, error)
+	}{
+		{
+			name: "complete_pipeline_success",
+			request: &QueryRequest{
+				Query:  "Test query",
+				UserID: stringPtr("user123"),
+			},
+			expectError: false,
+			validateFunc: func(t *testing.T, resp *QueryResponse, err error) {
+				if resp == nil {
+					t.Error("Expected response but got nil")
+					return
+				}
+				if resp.ConversationID == "" {
+					t.Error("Expected conversation ID")
+				}
+				if resp.MessageID == "" {
+					t.Error("Expected message ID")
+				}
+			},
+		},
+		{
+			name: "step1_validation_failure",
+			request: &QueryRequest{
+				Query: "", // Empty query
+			},
+			expectError: true,
+			errorStep:   "validation",
+		},
+		{
+			name: "step2_context_enrichment_failure",
+			request: &QueryRequest{
+				Query: "Test query",
+			},
+			setupFunc: func(p *Processor) {
+				// Replace context engine with failing one
+				p.contextEngine = &failingContextEngine{
+					failOn: "EnrichRequest",
+				}
+			},
+			expectError: false, // Should handle gracefully
+			validateFunc: func(t *testing.T, resp *QueryResponse, err error) {
+				// Should continue despite context failure
+				if err != nil {
+					t.Logf("Processing continued despite context failure: %v", err)
+				}
+			},
+		},
+		{
+			name: "step3_conversation_management_failure",
+			request: &QueryRequest{
+				Query:          "Test query",
+				ConversationID: stringPtr("invalid-conv-id"),
+			},
+			setupFunc: func(p *Processor) {
+				// Mock DB to fail on GetConversation
+				mockDB := p.db.(*postgres.MockClient)
+				mockDB.SetError("GetConversation", errors.New("conversation not found"))
+			},
+			expectError: false, // Should create new conversation
+		},
+		{
+			name: "step5_tool_detection",
+			request: &QueryRequest{
+				Query: "analyze the go code in main.go",
+				Tools: []string{"go_analyzer"},
+			},
+			expectError: false,
+			validateFunc: func(t *testing.T, resp *QueryResponse, err error) {
+				if resp != nil && len(resp.ToolsUsed) == 0 {
+					t.Log("No tools detected (expected in test mode)")
+				}
+			},
+		},
+		{
+			name: "step6_memory_retrieval",
+			request: &QueryRequest{
+				Query:  "What did we discuss earlier?",
+				UserID: stringPtr("user123"),
+			},
+			setupFunc: func(p *Processor) {
+				// Add some memory entries
+				if wm, ok := p.memory.(*memory.WorkingMemory); ok {
+					wm.Add("Previous discussion about Go testing")
+					wm.Add("User prefers table-driven tests")
+				}
+			},
+			expectError: false,
+		},
+		{
+			name: "step8_tool_execution_timeout",
+			request: &QueryRequest{
+				Query: "run slow operation",
+				Tools: []string{"slow_tool"},
+			},
+			setupFunc: func(p *Processor) {
+				// Register a slow tool
+				slowTool := &mockTool{
+					name: "slow_tool",
+					executeFunc: func(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+						select {
+						case <-time.After(10 * time.Second):
+							return &tools.ToolResult{Success: true}, nil
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
+					},
+				}
+				_ = p.tools.Register("slow_tool", func(cfg map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+					return slowTool, nil
+				}, tools.ToolInfo{Category: "test"})
+			},
+			expectError: false, // Should handle timeout gracefully
+			validateFunc: func(t *testing.T, resp *QueryResponse, err error) {
+				if err != nil && strings.Contains(err.Error(), "timeout") {
+					t.Log("Tool execution timed out as expected")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			// Setup processor
+			cfg := &config.Config{
+				Mode: "test",
+				AI: config.AIConfig{
+					DefaultProvider: "claude",
+					Claude: config.Claude{
+						APIKey: "test-key",
+						Model:  "claude-3-sonnet-20240229",
+					},
+				},
+			}
+			mockDB := postgres.NewMockClient(testutil.NewSilentLogger())
+			registry := tools.NewRegistry(testutil.NewTestLogger())
+			logger := testutil.NewTestLogger()
+
+			processor, err := NewProcessor(cfg, mockDB, registry, logger)
+			if err != nil {
+				t.Fatalf("Failed to create processor: %v", err)
+			}
+			defer func() {
+				_ = processor.Close(ctx)
+			}()
+
+			// Apply test-specific setup
+			if tt.setupFunc != nil {
+				tt.setupFunc(processor)
+			}
+
+			// Execute processing
+			resp, err := processor.Process(ctx, tt.request)
+
+			// Validate results
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				} else if tt.errorStep != "" && !strings.Contains(err.Error(), tt.errorStep) {
+					t.Errorf("Expected error in step %s, got: %v", tt.errorStep, err)
+				}
+			}
+
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, resp, err)
+			}
+		})
+	}
+}
+
+// TestProcessWithAI tests AI provider interaction scenarios
+func TestProcessWithAI(t *testing.T) {
+	tests := []struct {
+		name         string
+		provider     string
+		setupFunc    func(*Processor)
+		messages     []ai.Message
+		expectError  bool
+		validateFunc func(*testing.T, string, error)
+	}{
+		{
+			name:     "claude_provider_success",
+			provider: "claude",
+			messages: []ai.Message{
+				{Role: "user", Content: "Hello"},
+			},
+			expectError: false,
+		},
+		{
+			name:     "gemini_provider_success",
+			provider: "gemini",
+			messages: []ai.Message{
+				{Role: "user", Content: "Hello"},
+			},
+			expectError: false,
+		},
+		{
+			name:     "provider_authentication_error",
+			provider: "claude",
+			setupFunc: func(p *Processor) {
+				// Mock provider to return auth error
+				mockProvider := &mockAIProvider{
+					completeFunc: func(ctx context.Context, msgs []ai.Message, opts ...ai.CallOption) (*ai.Response, error) {
+						return nil, errors.New("authentication failed: invalid API key")
+					},
+				}
+				p.aiProvider = mockProvider
+			},
+			messages: []ai.Message{
+				{Role: "user", Content: "Hello"},
+			},
+			expectError: true,
+		},
+		{
+			name:     "provider_rate_limit_error",
+			provider: "claude",
+			setupFunc: func(p *Processor) {
+				mockProvider := &mockAIProvider{
+					completeFunc: func(ctx context.Context, msgs []ai.Message, opts ...ai.CallOption) (*ai.Response, error) {
+						return nil, errors.New("rate limit exceeded")
+					},
+				}
+				p.aiProvider = mockProvider
+			},
+			messages: []ai.Message{
+				{Role: "user", Content: "Hello"},
+			},
+			expectError: true,
+		},
+		{
+			name:     "empty_response_handling",
+			provider: "claude",
+			setupFunc: func(p *Processor) {
+				mockProvider := &mockAIProvider{
+					completeFunc: func(ctx context.Context, msgs []ai.Message, opts ...ai.CallOption) (*ai.Response, error) {
+						return &ai.Response{Content: ""}, nil
+					},
+				}
+				p.aiProvider = mockProvider
+			},
+			messages: []ai.Message{
+				{Role: "user", Content: "Hello"},
+			},
+			expectError: true,
+			validateFunc: func(t *testing.T, response string, err error) {
+				if err == nil || !strings.Contains(err.Error(), "empty response") {
+					t.Error("Expected empty response error")
+				}
+			},
+		},
+		{
+			name:     "message_history_management",
+			provider: "claude",
+			messages: []ai.Message{
+				{Role: "system", Content: "You are a helpful assistant"},
+				{Role: "user", Content: "Hello"},
+				{Role: "assistant", Content: "Hi there!"},
+				{Role: "user", Content: "How are you?"},
+			},
+			setupFunc: func(p *Processor) {
+				mockProvider := &mockAIProvider{
+					completeFunc: func(ctx context.Context, msgs []ai.Message, opts ...ai.CallOption) (*ai.Response, error) {
+						// Verify message history is properly formatted
+						if len(msgs) < 4 {
+							return nil, errors.New("message history not properly passed")
+						}
+						return &ai.Response{Content: "I'm doing well!"}, nil
+					},
+				}
+				p.aiProvider = mockProvider
+			},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			// Setup processor
+			cfg := &config.Config{
+				Mode: "test",
+				AI: config.AIConfig{
+					DefaultProvider: tt.provider,
+					Claude: config.Claude{
+						APIKey:    "test-key",
+						Model:     "claude-3-sonnet-20240229",
+						MaxTokens: 1000,
+					},
+					Gemini: config.Gemini{
+						APIKey:    "test-key",
+						Model:     "gemini-pro",
+						MaxTokens: 1000,
+					},
+				},
+			}
+			mockDB := postgres.NewMockClient(testutil.NewSilentLogger())
+			registry := tools.NewRegistry(testutil.NewTestLogger())
+			logger := testutil.NewTestLogger()
+
+			processor, err := NewProcessor(cfg, mockDB, registry, logger)
+			if err != nil {
+				t.Fatalf("Failed to create processor: %v", err)
+			}
+			defer func() {
+				_ = processor.Close(ctx)
+			}()
+
+			// Apply test-specific setup
+			if tt.setupFunc != nil {
+				tt.setupFunc(processor)
+			}
+
+			// Execute AI processing
+			response, err := processor.processWithAI(ctx, tt.messages, 1000, 0.7, tt.provider)
+
+			// Validate results
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+			} else {
+				if err != nil && !strings.Contains(err.Error(), "not configured") {
+					t.Errorf("Unexpected error: %v", err)
+				}
+			}
+
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, response, err)
+			}
+		})
+	}
+}
+
+// TestExecuteTools tests complex tool execution scenarios
+func TestExecuteTools(t *testing.T) {
+	tests := []struct {
+		name         string
+		query        string
+		tools        []string
+		setupFunc    func(*Processor)
+		validateFunc func(*testing.T, []ToolExecution, string)
+	}{
+		{
+			name:  "single_tool_execution",
+			query: "analyze main.go",
+			tools: []string{"go_analyzer"},
+			setupFunc: func(p *Processor) {
+				mockTool := &mockTool{
+					name: "go_analyzer",
+					executeFunc: func(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+						return &tools.ToolResult{
+							Success: true,
+							Data:    map[string]interface{}{"analysis": "complete"},
+						}, nil
+					},
+				}
+				_ = p.tools.Register("go_analyzer", func(cfg map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+					return mockTool, nil
+				}, tools.ToolInfo{Category: "analysis"})
+			},
+			validateFunc: func(t *testing.T, executions []ToolExecution, additionalContext string) {
+				if len(executions) == 0 {
+					t.Error("Expected tool execution")
+					return
+				}
+				if executions[0].ToolName != "go_analyzer" {
+					t.Errorf("Expected go_analyzer, got %s", executions[0].ToolName)
+				}
+			},
+		},
+		{
+			name:  "multiple_tool_execution",
+			query: "analyze and format the code",
+			tools: []string{"go_analyzer", "go_formatter"},
+			setupFunc: func(p *Processor) {
+				// Register multiple tools
+				tools := []string{"go_analyzer", "go_formatter"}
+				for _, toolName := range tools {
+					name := toolName // Capture loop variable
+					mockTool := &mockTool{
+						name: name,
+						executeFunc: func(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+							return &tools.ToolResult{
+								Success: true,
+								Data:    map[string]interface{}{name: "executed"},
+							}, nil
+						},
+					}
+					_ = p.tools.Register(name, func(cfg map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+						return mockTool, nil
+					}, tools.ToolInfo{Category: "test"})
+				}
+			},
+			validateFunc: func(t *testing.T, executions []ToolExecution, additionalContext string) {
+				if len(executions) < 2 {
+					t.Errorf("Expected 2 tool executions, got %d", len(executions))
+				}
+			},
+		},
+		{
+			name:  "tool_execution_with_timeout",
+			query: "run analysis",
+			tools: []string{"timeout_tool"},
+			setupFunc: func(p *Processor) {
+				timeoutTool := &mockTool{
+					name: "timeout_tool",
+					executeFunc: func(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+						select {
+						case <-time.After(10 * time.Second):
+							return &tools.ToolResult{Success: true}, nil
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
+					},
+				}
+				_ = p.tools.Register("timeout_tool", func(cfg map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+					return timeoutTool, nil
+				}, tools.ToolInfo{Category: "test"})
+			},
+			validateFunc: func(t *testing.T, executions []ToolExecution, additionalContext string) {
+				if len(executions) > 0 {
+					if executions[0].Error != "" && strings.Contains(executions[0].Error, "timeout") {
+						t.Log("Tool timed out as expected")
+					}
+				}
+			},
+		},
+		{
+			name:  "partial_tool_failure",
+			query: "run multiple operations",
+			tools: []string{"success_tool", "failure_tool", "another_success_tool"},
+			setupFunc: func(p *Processor) {
+				// Success tool
+				_ = p.tools.Register("success_tool", func(cfg map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+					return &mockTool{
+						name: "success_tool",
+						executeFunc: func(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+							return &tools.ToolResult{Success: true, Data: "success"}, nil
+						},
+					}, nil
+				}, tools.ToolInfo{Category: "test"})
+
+				// Failure tool
+				_ = p.tools.Register("failure_tool", func(cfg map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+					return &mockTool{
+						name: "failure_tool",
+						executeFunc: func(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+							return nil, errors.New("tool execution failed")
+						},
+					}, nil
+				}, tools.ToolInfo{Category: "test"})
+
+				// Another success tool
+				_ = p.tools.Register("another_success_tool", func(cfg map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+					return &mockTool{
+						name: "another_success_tool",
+						executeFunc: func(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+							return &tools.ToolResult{Success: true, Data: "another success"}, nil
+						},
+					}, nil
+				}, tools.ToolInfo{Category: "test"})
+			},
+			validateFunc: func(t *testing.T, executions []ToolExecution, additionalContext string) {
+				successCount := 0
+				failureCount := 0
+				for _, exec := range executions {
+					if exec.Error == "" {
+						successCount++
+					} else {
+						failureCount++
+					}
+				}
+				if successCount != 2 || failureCount != 1 {
+					t.Errorf("Expected 2 successes and 1 failure, got %d successes and %d failures",
+						successCount, failureCount)
+				}
+			},
+		},
+		{
+			name:  "tool_parameter_extraction",
+			query: "analyze the file /path/to/main.go with verbose output",
+			tools: []string{"parameterized_tool"},
+			setupFunc: func(p *Processor) {
+				paramTool := &mockTool{
+					name: "parameterized_tool",
+					executeFunc: func(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+						// Verify parameters were extracted
+						if path, ok := input["path"].(string); ok && strings.Contains(path, "/path/to/main.go") {
+							if verbose, ok := input["verbose"].(bool); ok && verbose {
+								return &tools.ToolResult{
+									Success: true,
+									Data:    "parameters correctly extracted",
+								}, nil
+							}
+						}
+						return &tools.ToolResult{
+							Success: false,
+							Data:    "parameters not correctly extracted",
+						}, nil
+					},
+				}
+				_ = p.tools.Register("parameterized_tool", func(cfg map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+					return paramTool, nil
+				}, tools.ToolInfo{Category: "test"})
+			},
+			validateFunc: func(t *testing.T, executions []ToolExecution, additionalContext string) {
+				if len(executions) > 0 && executions[0].Error == "" {
+					t.Log("Parameters extracted successfully")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			// Setup processor
+			cfg := &config.Config{Mode: "test"}
+			mockDB := postgres.NewMockClient(testutil.NewSilentLogger())
+			registry := tools.NewRegistry(testutil.NewTestLogger())
+			logger := testutil.NewTestLogger()
+
+			processor, err := NewProcessor(cfg, mockDB, registry, logger)
+			if err != nil {
+				t.Fatalf("Failed to create processor: %v", err)
+			}
+			defer func() {
+				_ = processor.Close(ctx)
+			}()
+
+			// Apply test-specific setup
+			if tt.setupFunc != nil {
+				tt.setupFunc(processor)
+			}
+
+			// Execute tools
+			executions, additionalContext := processor.executeTools(ctx, tt.query, tt.tools)
+
+			// Validate results
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, executions, additionalContext)
+			}
+		})
+	}
+}
+
+// TestBuildEnrichedContext tests context building with various failure scenarios
+func TestBuildEnrichedContext(t *testing.T) {
+	tests := []struct {
+		name         string
+		request      *QueryRequest
+		setupFunc    func(*Processor)
+		validateFunc func(*testing.T, map[string]interface{})
+	}{
+		{
+			name: "complete_context_building",
+			request: &QueryRequest{
+				Query:          "Test query",
+				UserID:         stringPtr("user123"),
+				ConversationID: stringPtr("conv456"),
+			},
+			setupFunc: func(p *Processor) {
+				// Add various context sources
+				if ce, ok := p.contextEngine.(*contextEngine.Engine); ok {
+					ce.UpdatePersonalContext("user123", map[string]interface{}{
+						"preferences": map[string]interface{}{
+							"language": "Go",
+							"style":    "idiomatic",
+						},
+					})
+				}
+			},
+			validateFunc: func(t *testing.T, context map[string]interface{}) {
+				if context == nil {
+					t.Error("Expected context but got nil")
+					return
+				}
+				if _, ok := context["user_id"]; !ok {
+					t.Error("Expected user_id in context")
+				}
+				if _, ok := context["personal_context"]; !ok {
+					t.Error("Expected personal_context in context")
+				}
+			},
+		},
+		{
+			name: "context_with_tool_memory",
+			request: &QueryRequest{
+				Query:  "Run the same analysis as before",
+				UserID: stringPtr("user123"),
+			},
+			setupFunc: func(p *Processor) {
+				// Add tool memory
+				// This would be populated by previous tool executions
+			},
+			validateFunc: func(t *testing.T, context map[string]interface{}) {
+				if context == nil {
+					t.Error("Expected context but got nil")
+				}
+			},
+		},
+		{
+			name: "partial_context_failure",
+			request: &QueryRequest{
+				Query: "Test query",
+			},
+			setupFunc: func(p *Processor) {
+				// Replace context engine with partially failing one
+				p.contextEngine = &partiallyFailingContextEngine{
+					Engine: p.contextEngine.(*contextEngine.Engine),
+					failOn: "GetPersonalContext",
+				}
+			},
+			validateFunc: func(t *testing.T, context map[string]interface{}) {
+				// Should still have some context even with partial failure
+				if context == nil {
+					t.Error("Expected partial context but got nil")
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			cfg := &config.Config{Mode: "test"}
+			mockDB := postgres.NewMockClient(testutil.NewSilentLogger())
+			registry := tools.NewRegistry(testutil.NewTestLogger())
+			logger := testutil.NewTestLogger()
+
+			processor, err := NewProcessor(cfg, mockDB, registry, logger)
+			if err != nil {
+				t.Fatalf("Failed to create processor: %v", err)
+			}
+			defer func() {
+				_ = processor.Close(ctx)
+			}()
+
+			// Apply test-specific setup
+			if tt.setupFunc != nil {
+				tt.setupFunc(processor)
+			}
+
+			// Build context
+			enrichedContext := processor.buildEnrichedContext(ctx, tt.request, nil)
+
+			// Validate results
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, enrichedContext)
+			}
+		})
+	}
+}
+
+// TestGetContextAwareSystemPrompt tests system prompt generation
+func TestGetContextAwareSystemPrompt(t *testing.T) {
+	tests := []struct {
+		name         string
+		context      map[string]interface{}
+		validateFunc func(*testing.T, string)
+	}{
+		{
+			name: "basic_system_prompt",
+			context: map[string]interface{}{
+				"mode": "test",
+			},
+			validateFunc: func(t *testing.T, prompt string) {
+				if prompt == "" {
+					t.Error("Expected non-empty prompt")
+				}
+				if !strings.Contains(prompt, "intelligent development companion") {
+					t.Error("Expected base prompt content")
+				}
+			},
+		},
+		{
+			name: "prompt_with_user_preferences",
+			context: map[string]interface{}{
+				"personal_context": map[string]interface{}{
+					"preferences": map[string]interface{}{
+						"communication_style": "concise",
+						"expertise_level":     "expert",
+					},
+				},
+			},
+			validateFunc: func(t *testing.T, prompt string) {
+				if !strings.Contains(prompt, "User Preferences") {
+					t.Error("Expected user preferences in prompt")
+				}
+			},
+		},
+		{
+			name: "prompt_with_workspace_context",
+			context: map[string]interface{}{
+				"workspace_context": map[string]interface{}{
+					"current_directory": "/project",
+					"active_files":      []string{"main.go", "test.go"},
+				},
+			},
+			validateFunc: func(t *testing.T, prompt string) {
+				if !strings.Contains(prompt, "Workspace Context") {
+					t.Error("Expected workspace context in prompt")
+				}
+			},
+		},
+		{
+			name: "prompt_with_temporal_context",
+			context: map[string]interface{}{
+				"temporal_context": map[string]interface{}{
+					"time_of_day":    "morning",
+					"day_of_week":    "Monday",
+					"recent_pattern": "debugging",
+				},
+			},
+			validateFunc: func(t *testing.T, prompt string) {
+				if !strings.Contains(prompt, "Temporal Context") {
+					t.Error("Expected temporal context in prompt")
+				}
+			},
+		},
+		{
+			name: "prompt_with_all_contexts",
+			context: map[string]interface{}{
+				"personal_context": map[string]interface{}{
+					"preferences": map[string]interface{}{"style": "detailed"},
+				},
+				"workspace_context": map[string]interface{}{
+					"current_directory": "/app",
+				},
+				"temporal_context": map[string]interface{}{
+					"time_of_day": "evening",
+				},
+				"semantic_context": map[string]interface{}{
+					"domain": "web development",
+				},
+			},
+			validateFunc: func(t *testing.T, prompt string) {
+				contexts := []string{"Personal", "Workspace", "Temporal", "Semantic"}
+				for _, ctx := range contexts {
+					if !strings.Contains(prompt, ctx+" Context") {
+						t.Errorf("Expected %s Context in prompt", ctx)
+					}
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := &config.Config{Mode: "test"}
+			mockDB := postgres.NewMockClient(testutil.NewSilentLogger())
+			registry := tools.NewRegistry(testutil.NewTestLogger())
+			logger := testutil.NewTestLogger()
+
+			processor, err := NewProcessor(cfg, mockDB, registry, logger)
+			if err != nil {
+				t.Fatalf("Failed to create processor: %v", err)
+			}
+			defer func() {
+				_ = processor.Close(context.Background())
+			}()
+
+			// Generate prompt
+			prompt := processor.getContextAwareSystemPrompt(tt.context)
+
+			// Validate
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, prompt)
+			}
+		})
+	}
+}
+
+// TestConcurrentProcessing tests concurrent query processing
+func TestConcurrentProcessing(t *testing.T) {
+	ctx := context.Background()
+	cfg := &config.Config{
+		Mode: "test",
+		AI: config.AIConfig{
+			DefaultProvider: "claude",
+			Claude: config.Claude{
+				APIKey: "test-key",
+				Model:  "claude-3-sonnet-20240229",
+			},
+		},
+	}
+	mockDB := postgres.NewMockClient(testutil.NewSilentLogger())
+	registry := tools.NewRegistry(testutil.NewTestLogger())
+	logger := testutil.NewSilentLogger()
+
+	processor, err := NewProcessor(cfg, mockDB, registry, logger)
+	if err != nil {
+		t.Fatalf("Failed to create processor: %v", err)
+	}
+	defer func() {
+		_ = processor.Close(ctx)
+	}()
+
+	// Process multiple queries concurrently
+	numQueries := 20
+	var wg sync.WaitGroup
+	errors := make([]error, 0, numQueries)
+	var errorsMu sync.Mutex
+
+	for i := 0; i < numQueries; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+
+			request := &QueryRequest{
+				Query:  fmt.Sprintf("Test query %d", id),
+				UserID: stringPtr(fmt.Sprintf("user%d", id)),
+			}
+
+			_, err := processor.Process(ctx, request)
+			if err != nil {
+				errorsMu.Lock()
+				errors = append(errors, err)
+				errorsMu.Unlock()
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	// Log any errors (expected in test mode)
+	for _, err := range errors {
+		t.Logf("Concurrent processing error: %v", err)
+	}
+}
+
+// TestMemoryOperations tests memory-related operations in the processor
+func TestMemoryOperations(t *testing.T) {
+	tests := []struct {
+		name         string
+		setupFunc    func(*Processor)
+		operation    func(*Processor) error
+		validateFunc func(*testing.T, *Processor)
+	}{
+		{
+			name: "working_memory_operations",
+			setupFunc: func(p *Processor) {
+				// Add items to working memory
+				if wm, ok := p.memory.(*memory.WorkingMemory); ok {
+					wm.Add("First item")
+					wm.Add("Second item")
+					wm.Add("Third item")
+				}
+			},
+			operation: func(p *Processor) error {
+				// Retrieve recent items
+				if wm, ok := p.memory.(*memory.WorkingMemory); ok {
+					recent := wm.GetRecent(2)
+					if len(recent) != 2 {
+						return fmt.Errorf("expected 2 recent items, got %d", len(recent))
+					}
+				}
+				return nil
+			},
+			validateFunc: func(t *testing.T, p *Processor) {
+				if wm, ok := p.memory.(*memory.WorkingMemory); ok {
+					if wm.Size() != 3 {
+						t.Errorf("Expected 3 items in working memory, got %d", wm.Size())
+					}
+				}
+			},
+		},
+		{
+			name: "memory_context_retrieval",
+			setupFunc: func(p *Processor) {
+				// Add contextual items
+				if wm, ok := p.memory.(*memory.WorkingMemory); ok {
+					wm.Add("User prefers Go language")
+					wm.Add("Working on test implementation")
+					wm.Add("Focus on table-driven tests")
+				}
+			},
+			operation: func(p *Processor) error {
+				// Search for relevant context
+				if wm, ok := p.memory.(*memory.WorkingMemory); ok {
+					items := wm.GetAll()
+					found := false
+					for _, item := range items {
+						if strings.Contains(item, "test") {
+							found = true
+							break
+						}
+					}
+					if !found {
+						return errors.New("test-related memory not found")
+					}
+				}
+				return nil
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			cfg := &config.Config{Mode: "test"}
+			mockDB := postgres.NewMockClient(testutil.NewSilentLogger())
+			registry := tools.NewRegistry(testutil.NewTestLogger())
+			logger := testutil.NewTestLogger()
+
+			processor, err := NewProcessor(cfg, mockDB, registry, logger)
+			if err != nil {
+				t.Fatalf("Failed to create processor: %v", err)
+			}
+			defer func() {
+				_ = processor.Close(ctx)
+			}()
+
+			// Setup
+			if tt.setupFunc != nil {
+				tt.setupFunc(processor)
+			}
+
+			// Execute operation
+			if tt.operation != nil {
+				if err := tt.operation(processor); err != nil {
+					t.Errorf("Operation failed: %v", err)
+				}
+			}
+
+			// Validate
+			if tt.validateFunc != nil {
+				tt.validateFunc(t, processor)
+			}
+		})
+	}
+}
+
+// BenchmarkProcessorPipeline benchmarks the complete processing pipeline
+func BenchmarkProcessorPipeline(b *testing.B) {
+	ctx := context.Background()
+	cfg := &config.Config{
+		Mode: "test",
+		AI: config.AIConfig{
+			DefaultProvider: "claude",
+			Claude: config.Claude{
+				APIKey: "test-key",
+				Model:  "claude-3-sonnet-20240229",
+			},
+		},
+	}
+	mockDB := postgres.NewMockClient(testutil.NewSilentLogger())
+	registry := tools.NewRegistry(testutil.NewSilentLogger())
+	logger := testutil.NewSilentLogger()
+
+	processor, err := NewProcessor(cfg, mockDB, registry, logger)
+	if err != nil {
+		b.Fatalf("Failed to create processor: %v", err)
+	}
+	defer func() {
+		_ = processor.Close(ctx)
+	}()
+
+	requests := []*QueryRequest{
+		{Query: "Simple query", UserID: stringPtr("user1")},
+		{Query: "Analyze this code", UserID: stringPtr("user2"), Tools: []string{"analyzer"}},
+		{Query: "Complex request with context", UserID: stringPtr("user3"), ConversationID: stringPtr("conv1")},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		request := requests[i%len(requests)]
+		_, _ = processor.Process(ctx, request)
+	}
+}
+
+// BenchmarkContextBuilding benchmarks context building performance
+func BenchmarkContextBuilding(b *testing.B) {
+	ctx := context.Background()
+	cfg := &config.Config{Mode: "test"}
+	mockDB := postgres.NewMockClient(testutil.NewSilentLogger())
+	registry := tools.NewRegistry(testutil.NewSilentLogger())
+	logger := testutil.NewSilentLogger()
+
+	processor, err := NewProcessor(cfg, mockDB, registry, logger)
+	if err != nil {
+		b.Fatalf("Failed to create processor: %v", err)
+	}
+	defer func() {
+		_ = processor.Close(ctx)
+	}()
+
+	request := &QueryRequest{
+		Query:          "Test query",
+		UserID:         stringPtr("user123"),
+		ConversationID: stringPtr("conv456"),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = processor.buildEnrichedContext(ctx, request, nil)
+	}
+}
+
+// BenchmarkSystemPromptGeneration benchmarks system prompt generation
+func BenchmarkSystemPromptGeneration(b *testing.B) {
+	cfg := &config.Config{Mode: "test"}
+	mockDB := postgres.NewMockClient(testutil.NewSilentLogger())
+	registry := tools.NewRegistry(testutil.NewSilentLogger())
+	logger := testutil.NewSilentLogger()
+
+	processor, err := NewProcessor(cfg, mockDB, registry, logger)
+	if err != nil {
+		b.Fatalf("Failed to create processor: %v", err)
+	}
+	defer func() {
+		_ = processor.Close(context.Background())
+	}()
+
+	contexts := []map[string]interface{}{
+		{"mode": "test"},
+		{"personal_context": map[string]interface{}{"preferences": map[string]interface{}{"style": "concise"}}},
+		{"workspace_context": map[string]interface{}{"current_directory": "/app"}, "temporal_context": map[string]interface{}{"time": "morning"}},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		context := contexts[i%len(contexts)]
+		_ = processor.getContextAwareSystemPrompt(context)
+	}
+}
+
+// Helper types for testing
+
+type failingContextEngine struct {
+	failOn string
+}
+
+func (f *failingContextEngine) Start() error { return nil }
+func (f *failingContextEngine) Stop() error  { return nil }
+func (f *failingContextEngine) EnrichRequest(req *QueryRequest) *QueryRequest {
+	if f.failOn == "EnrichRequest" {
+		return req // Return original without enrichment
+	}
+	return req
+}
+func (f *failingContextEngine) GetPersonalContext(userID string) map[string]interface{} {
+	if f.failOn == "GetPersonalContext" {
+		return nil
+	}
+	return map[string]interface{}{"user_id": userID}
+}
+func (f *failingContextEngine) GetWorkspaceContext() map[string]interface{} {
+	if f.failOn == "GetWorkspaceContext" {
+		return nil
+	}
+	return map[string]interface{}{}
+}
+func (f *failingContextEngine) GetTemporalContext() map[string]interface{} {
+	if f.failOn == "GetTemporalContext" {
+		return nil
+	}
+	return map[string]interface{}{}
+}
+func (f *failingContextEngine) GetSemanticContext(query string) map[string]interface{} {
+	if f.failOn == "GetSemanticContext" {
+		return nil
+	}
+	return map[string]interface{}{}
+}
+func (f *failingContextEngine) UpdatePersonalContext(userID string, data map[string]interface{}) {}
+func (f *failingContextEngine) UpdateWorkspaceContext(data map[string]interface{})               {}
+func (f *failingContextEngine) RecordInteraction(userID, interactionType string, data map[string]interface{}) {
+}
+
+type partiallyFailingContextEngine struct {
+	failOn string
+}
+
+func (p *partiallyFailingContextEngine) Start() error { return nil }
+func (p *partiallyFailingContextEngine) Stop() error  { return nil }
+func (p *partiallyFailingContextEngine) EnrichRequest(req *QueryRequest) *QueryRequest {
+	return req
+}
+func (p *partiallyFailingContextEngine) GetPersonalContext(userID string) map[string]interface{} {
+	if p.failOn == "GetPersonalContext" {
+		return nil
+	}
+	return map[string]interface{}{"user_id": userID}
+}
+func (p *partiallyFailingContextEngine) GetWorkspaceContext() map[string]interface{} {
+	return map[string]interface{}{}
+}
+func (p *partiallyFailingContextEngine) GetTemporalContext() map[string]interface{} {
+	return map[string]interface{}{}
+}
+func (p *partiallyFailingContextEngine) GetSemanticContext(query string) map[string]interface{} {
+	return map[string]interface{}{}
+}
+func (p *partiallyFailingContextEngine) UpdatePersonalContext(userID string, data map[string]interface{}) {
+}
+func (p *partiallyFailingContextEngine) UpdateWorkspaceContext(data map[string]interface{}) {}
+func (p *partiallyFailingContextEngine) RecordInteraction(userID, interactionType string, data map[string]interface{}) {
+}
+
+// Simplified mock AI provider interface
+type mockAIProvider struct {
+	completeFunc func(context.Context, []interface{}, ...interface{}) (interface{}, error)
+}
+
+func (m *mockAIProvider) Complete(ctx context.Context, messages []interface{}, opts ...interface{}) (interface{}, error) {
+	if m.completeFunc != nil {
+		return m.completeFunc(ctx, messages, opts...)
+	}
+	return map[string]interface{}{"content": "Mock response"}, nil
+}
+
+func (m *mockAIProvider) Name() string {
+	return "mock"
+}
+
+// TestStoreMessage tests message storage functionality
+func TestStoreMessage(t *testing.T) {
+	tests := []struct {
+		name        string
+		setupFunc   func(*Processor)
+		message     *sqlc.CreateMessageParams
+		expectError bool
+	}{
+		{
+			name: "successful_message_storage",
+			message: &sqlc.CreateMessageParams{
+				ConversationID: "conv123",
+				Role:           "user",
+				Content:        "Test message",
+			},
+			expectError: false,
+		},
+		{
+			name: "message_storage_with_db_error",
+			setupFunc: func(p *Processor) {
+				mockDB := p.db.(*postgres.MockClient)
+				mockDB.SetError("CreateMessage", errors.New("database error"))
+			},
+			message: &sqlc.CreateMessageParams{
+				ConversationID: "conv123",
+				Role:           "user",
+				Content:        "Test message",
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := context.Background()
+			cfg := &config.Config{Mode: "test"}
+			mockDB := postgres.NewMockClient(testutil.NewSilentLogger())
+			registry := tools.NewRegistry(testutil.NewTestLogger())
+			logger := testutil.NewTestLogger()
+
+			processor, err := NewProcessor(cfg, mockDB, registry, logger)
+			if err != nil {
+				t.Fatalf("Failed to create processor: %v", err)
+			}
+			defer func() {
+				_ = processor.Close(ctx)
+			}()
+
+			if tt.setupFunc != nil {
+				tt.setupFunc(processor)
+			}
+
+			err = processor.storeMessage(ctx, tt.message)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("Expected error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}

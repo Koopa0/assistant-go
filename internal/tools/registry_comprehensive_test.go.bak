@@ -1,0 +1,443 @@
+package tools
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"sync"
+	"testing"
+	"testing/quick"
+	"time"
+
+	"github.com/koopa0/assistant-go/test/testutil"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// MockTool for testing
+type MockTool struct {
+	name        string
+	description string
+	parameters  map[string]interface{}
+	executeFunc func(ctx context.Context, input map[string]interface{}) (*ToolResult, error)
+	callCount   int
+	mutex       sync.Mutex
+}
+
+func NewMockTool(name, description string) *MockTool {
+	return &MockTool{
+		name:        name,
+		description: description,
+		parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"input": map[string]interface{}{
+					"type":        "string",
+					"description": "Test input parameter",
+				},
+			},
+		},
+	}
+}
+
+func (m *MockTool) Name() string                       { return m.name }
+func (m *MockTool) Description() string                { return m.description }
+func (m *MockTool) Parameters() map[string]interface{} { return m.parameters }
+
+func (m *MockTool) Execute(ctx context.Context, input map[string]interface{}) (*ToolResult, error) {
+	m.mutex.Lock()
+	m.callCount++
+	m.mutex.Unlock()
+
+	if m.executeFunc != nil {
+		return m.executeFunc(ctx, input)
+	}
+
+	return &ToolResult{
+		Success: true,
+		Data: map[string]interface{}{
+			"result": "mock execution successful",
+			"input":  input,
+		},
+		ExecutionTime: 10 * time.Millisecond,
+	}, nil
+}
+
+func (m *MockTool) GetCallCount() int {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	return m.callCount
+}
+
+func (m *MockTool) SetExecuteFunc(fn func(ctx context.Context, input map[string]interface{}) (*ToolResult, error)) {
+	m.executeFunc = fn
+}
+
+func TestRegistry_Creation(t *testing.T) {
+	logger := testutil.CreateTestLogger(slog.LevelDebug)
+	registry := NewRegistry(logger)
+
+	assert.NotNil(t, registry, "Registry should not be nil")
+	assert.Empty(t, registry.ListTools(), "New registry should be empty")
+}
+
+func TestRegistry_RegisterTool(t *testing.T) {
+	logger := testutil.CreateTestLogger(slog.LevelDebug)
+	registry := NewRegistry(logger)
+
+	tests := []struct {
+		name    string
+		tool    Tool
+		wantErr bool
+	}{
+		{
+			name:    "valid_tool",
+			tool:    NewMockTool("test-tool", "Test tool"),
+			wantErr: false,
+		},
+		{
+			name:    "nil_tool",
+			tool:    nil,
+			wantErr: true,
+		},
+		{
+			name:    "empty_name_tool",
+			tool:    NewMockTool("", "Tool with empty name"),
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := registry.RegisterTool(tt.tool)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Contains(t, registry.ListTools(), tt.tool.Name())
+			}
+		})
+	}
+}
+
+func TestRegistry_DuplicateRegistration(t *testing.T) {
+	logger := testutil.CreateTestLogger(slog.LevelDebug)
+	registry := NewRegistry(logger)
+
+	tool1 := NewMockTool("duplicate-tool", "First tool")
+	tool2 := NewMockTool("duplicate-tool", "Second tool")
+
+	// First registration should succeed
+	err := registry.RegisterTool(tool1)
+	assert.NoError(t, err)
+
+	// Second registration with same name should fail
+	err = registry.RegisterTool(tool2)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "already registered")
+}
+
+func TestRegistry_GetTool(t *testing.T) {
+	logger := testutil.CreateTestLogger(slog.LevelDebug)
+	registry := NewRegistry(logger)
+
+	tool := NewMockTool("test-tool", "Test tool")
+	err := registry.RegisterTool(tool)
+	require.NoError(t, err)
+
+	t.Run("existing_tool", func(t *testing.T) {
+		retrieved, exists := registry.GetTool("test-tool")
+		assert.True(t, exists)
+		assert.Equal(t, tool.Name(), retrieved.Name())
+	})
+
+	t.Run("non_existing_tool", func(t *testing.T) {
+		retrieved, exists := registry.GetTool("non-existent")
+		assert.False(t, exists)
+		assert.Nil(t, retrieved)
+	})
+}
+
+func TestRegistry_ExecuteTool(t *testing.T) {
+	logger := testutil.CreateTestLogger(slog.LevelDebug)
+	registry := NewRegistry(logger)
+
+	tool := NewMockTool("test-tool", "Test tool")
+	err := registry.RegisterTool(tool)
+	require.NoError(t, err)
+
+	ctx := context.Background()
+	input := map[string]interface{}{
+		"input": "test value",
+	}
+
+	t.Run("successful_execution", func(t *testing.T) {
+		result, err := registry.ExecuteTool(ctx, "test-tool", input)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.True(t, result.Success)
+		assert.Equal(t, 1, tool.GetCallCount())
+	})
+
+	t.Run("non_existing_tool", func(t *testing.T) {
+		result, err := registry.ExecuteTool(ctx, "non-existent", input)
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "not found")
+	})
+
+	t.Run("tool_execution_error", func(t *testing.T) {
+		errorTool := NewMockTool("error-tool", "Tool that errors")
+		errorTool.SetExecuteFunc(func(ctx context.Context, input map[string]interface{}) (*ToolResult, error) {
+			return nil, errors.New("execution failed")
+		})
+
+		err := registry.RegisterTool(errorTool)
+		require.NoError(t, err)
+
+		result, err := registry.ExecuteTool(ctx, "error-tool", input)
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "execution failed")
+	})
+}
+
+func TestRegistry_ConcurrentOperations(t *testing.T) {
+	logger := testutil.CreateTestLogger(slog.LevelError) // Reduce logging for concurrent tests
+	registry := NewRegistry(logger)
+
+	// Register initial tools
+	for i := 0; i < 5; i++ {
+		tool := NewMockTool(fmt.Sprintf("tool-%d", i), fmt.Sprintf("Tool %d", i))
+		err := registry.RegisterTool(tool)
+		require.NoError(t, err)
+	}
+
+	ctx := context.Background()
+	numGoroutines := 20
+	var wg sync.WaitGroup
+
+	t.Run("concurrent_executions", func(t *testing.T) {
+		wg.Add(numGoroutines)
+
+		for i := 0; i < numGoroutines; i++ {
+			go func(index int) {
+				defer wg.Done()
+
+				toolName := fmt.Sprintf("tool-%d", index%5)
+				input := map[string]interface{}{
+					"input": fmt.Sprintf("test-%d", index),
+				}
+
+				result, err := registry.ExecuteTool(ctx, toolName, input)
+				assert.NoError(t, err)
+				assert.NotNil(t, result)
+				assert.True(t, result.Success)
+			}(i)
+		}
+
+		wg.Wait()
+	})
+
+	t.Run("concurrent_registrations", func(t *testing.T) {
+		numRegistrations := 10
+		wg.Add(numRegistrations)
+		errors := make(chan error, numRegistrations)
+
+		for i := 0; i < numRegistrations; i++ {
+			go func(index int) {
+				defer wg.Done()
+
+				tool := NewMockTool(fmt.Sprintf("concurrent-tool-%d", index), fmt.Sprintf("Concurrent Tool %d", index))
+				err := registry.RegisterTool(tool)
+				errors <- err
+			}(i)
+		}
+
+		wg.Wait()
+		close(errors)
+
+		// All registrations should succeed
+		for err := range errors {
+			assert.NoError(t, err)
+		}
+
+		// Verify all tools were registered
+		tools := registry.ListTools()
+		assert.GreaterOrEqual(t, len(tools), 15) // 5 initial + 10 concurrent
+	})
+}
+
+func TestRegistry_ContextCancellation(t *testing.T) {
+	logger := testutil.CreateTestLogger(slog.LevelDebug)
+	registry := NewRegistry(logger)
+
+	// Create a tool that takes time to execute
+	slowTool := NewMockTool("slow-tool", "Slow tool")
+	slowTool.SetExecuteFunc(func(ctx context.Context, input map[string]interface{}) (*ToolResult, error) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(1 * time.Second):
+			return &ToolResult{Success: true}, nil
+		}
+	})
+
+	err := registry.RegisterTool(slowTool)
+	require.NoError(t, err)
+
+	t.Run("context_timeout", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+
+		input := map[string]interface{}{"input": "test"}
+		result, err := registry.ExecuteTool(ctx, "slow-tool", input)
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "context deadline exceeded")
+	})
+
+	t.Run("context_cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		// Cancel context after a short delay
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			cancel()
+		}()
+
+		input := map[string]interface{}{"input": "test"}
+		result, err := registry.ExecuteTool(ctx, "slow-tool", input)
+
+		assert.Error(t, err)
+		assert.Nil(t, result)
+		assert.Contains(t, err.Error(), "context canceled")
+	})
+}
+
+func TestRegistry_ListTools(t *testing.T) {
+	logger := testutil.CreateTestLogger(slog.LevelDebug)
+	registry := NewRegistry(logger)
+
+	// Initially empty
+	tools := registry.ListTools()
+	assert.Empty(t, tools)
+
+	// Add tools
+	expectedTools := []string{"tool-1", "tool-2", "tool-3"}
+	for _, name := range expectedTools {
+		tool := NewMockTool(name, fmt.Sprintf("Description for %s", name))
+		err := registry.RegisterTool(tool)
+		require.NoError(t, err)
+	}
+
+	// Verify list
+	tools = registry.ListTools()
+	assert.Len(t, tools, len(expectedTools))
+	for _, expected := range expectedTools {
+		assert.Contains(t, tools, expected)
+	}
+}
+
+func TestRegistry_ToolMetadata(t *testing.T) {
+	logger := testutil.CreateTestLogger(slog.LevelDebug)
+	registry := NewRegistry(logger)
+
+	tool := NewMockTool("metadata-tool", "Tool with metadata")
+	err := registry.RegisterTool(tool)
+	require.NoError(t, err)
+
+	retrieved, exists := registry.GetTool("metadata-tool")
+	require.True(t, exists)
+
+	assert.Equal(t, "metadata-tool", retrieved.Name())
+	assert.Equal(t, "Tool with metadata", retrieved.Description())
+	assert.NotNil(t, retrieved.Parameters())
+	assert.Contains(t, retrieved.Parameters(), "type")
+}
+
+// Benchmark tests
+func BenchmarkRegistry_ExecuteTool(b *testing.B) {
+	logger := testutil.CreateTestLogger(slog.LevelError)
+	registry := NewRegistry(logger)
+
+	tool := NewMockTool("benchmark-tool", "Benchmark tool")
+	err := registry.RegisterTool(tool)
+	require.NoError(b, err)
+
+	ctx := context.Background()
+	input := map[string]interface{}{
+		"input": "benchmark test",
+	}
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		_, err := registry.ExecuteTool(ctx, "benchmark-tool", input)
+		if err != nil {
+			b.Fatalf("Tool execution failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkRegistry_ConcurrentExecution(b *testing.B) {
+	logger := testutil.CreateTestLogger(slog.LevelError)
+	registry := NewRegistry(logger)
+
+	tool := NewMockTool("concurrent-benchmark-tool", "Concurrent benchmark tool")
+	err := registry.RegisterTool(tool)
+	require.NoError(b, err)
+
+	ctx := context.Background()
+	input := map[string]interface{}{
+		"input": "concurrent benchmark test",
+	}
+
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_, err := registry.ExecuteTool(ctx, "concurrent-benchmark-tool", input)
+			if err != nil {
+				b.Fatalf("Concurrent tool execution failed: %v", err)
+			}
+		}
+	})
+}
+
+// Property-based test using Go's testing.Quick
+func TestRegistry_Properties(t *testing.T) {
+	logger := testutil.CreateTestLogger(slog.LevelError)
+
+	property := func(toolNames []string) bool {
+		if len(toolNames) == 0 {
+			return true // Skip empty input
+		}
+
+		registry := NewRegistry(logger)
+
+		// Register tools with unique names
+		uniqueNames := make(map[string]bool)
+		for _, name := range toolNames {
+			if name == "" || uniqueNames[name] {
+				continue // Skip empty or duplicate names
+			}
+			uniqueNames[name] = true
+
+			tool := NewMockTool(name, fmt.Sprintf("Tool %s", name))
+			err := registry.RegisterTool(tool)
+			if err != nil {
+				return false
+			}
+		}
+
+		// Property: Number of listed tools should equal number of registered tools
+		listedTools := registry.ListTools()
+		return len(listedTools) == len(uniqueNames)
+	}
+
+	err := quick.Check(property, nil)
+	assert.NoError(t, err, "Property should hold for all inputs")
+}

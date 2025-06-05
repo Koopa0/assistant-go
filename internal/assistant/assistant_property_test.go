@@ -20,7 +20,7 @@ func FuzzQueryProcessing(f *testing.F) {
 	f.Add("Hello world")
 	f.Add("Analyze this Go code")
 	f.Add("What is the meaning of life?")
-	f.Add("帮助我理解并发编程")         // Chinese
+	f.Add("幫助我理解並發編程")         // Chinese
 	f.Add("مساعدة في البرمجة") // Arabic
 	f.Add("🚀 Test emoji query")
 	f.Add("")
@@ -282,11 +282,18 @@ func TestPropertyBasedStats(t *testing.T) {
 
 		// Property: Processor stats should be valid
 		if stats.Processor != nil {
-			if stats.Processor.RequestsProcessed < 0 {
-				t.Errorf("RequestsProcessed should be non-negative, got: %d", stats.Processor.RequestsProcessed)
+			if stats.Processor.Processor != nil {
+				if stats.Processor.Processor.Status == "" {
+					t.Errorf("Processor status should not be empty")
+				}
+				if stats.Processor.Processor.Version == "" {
+					t.Errorf("Processor version should not be empty")
+				}
 			}
-			if stats.Processor.AverageProcessingTimeMs < 0 {
-				t.Errorf("AverageProcessingTimeMs should be non-negative, got: %d", stats.Processor.AverageProcessingTimeMs)
+			if stats.Processor.Health != nil {
+				if stats.Processor.Health.Status == "" {
+					t.Errorf("Health status should not be empty")
+				}
 			}
 		}
 	}
@@ -468,12 +475,16 @@ func TestTypedStructs(t *testing.T) {
 				},
 			},
 			Processor: &ProcessorStats{
-				RequestsProcessed:       100,
-				AverageProcessingTimeMs: 2000,
-				ProviderCounts: map[string]int64{
-					"claude": 80,
-					"gemini": 20,
+				Processor: &ProcessorInfo{
+					Status:  "healthy",
+					Version: "1.0.0",
+					Uptime:  "120s",
 				},
+				Health: &HealthStatus{
+					Status:    "healthy",
+					LastCheck: time.Now(),
+				},
+				// TODO: Add performance metrics when tracking is implemented
 			},
 		}
 
@@ -487,8 +498,8 @@ func TestTypedStructs(t *testing.T) {
 		if stats.Tools.RegisteredTools != 5 {
 			t.Errorf("Expected RegisteredTools 5, got %d", stats.Tools.RegisteredTools)
 		}
-		if stats.Processor.RequestsProcessed != 100 {
-			t.Errorf("Expected RequestsProcessed 100, got %d", stats.Processor.RequestsProcessed)
+		if stats.Processor.Processor.Status != "healthy" {
+			t.Errorf("Expected processor status 'healthy', got %s", stats.Processor.Processor.Status)
 		}
 	})
 

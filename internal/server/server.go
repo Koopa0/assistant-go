@@ -12,6 +12,20 @@ import (
 	"github.com/koopa0/assistant-go/internal/assistant"
 	"github.com/koopa0/assistant-go/internal/config"
 	"github.com/koopa0/assistant-go/internal/observability"
+	"github.com/koopa0/assistant-go/internal/server/analytics"
+	"github.com/koopa0/assistant-go/internal/server/auth"
+	"github.com/koopa0/assistant-go/internal/server/chat"
+	"github.com/koopa0/assistant-go/internal/server/collaboration"
+	"github.com/koopa0/assistant-go/internal/server/conversation"
+	"github.com/koopa0/assistant-go/internal/server/knowledge"
+	langchain "github.com/koopa0/assistant-go/internal/server/langchain"
+	"github.com/koopa0/assistant-go/internal/server/learning"
+	"github.com/koopa0/assistant-go/internal/server/memory"
+	"github.com/koopa0/assistant-go/internal/server/system"
+	"github.com/koopa0/assistant-go/internal/server/tools"
+	"github.com/koopa0/assistant-go/internal/server/users"
+	"github.com/koopa0/assistant-go/internal/server/websocket"
+	"github.com/koopa0/assistant-go/internal/storage/postgres/sqlc"
 )
 
 // Server represents the HTTP API server
@@ -21,10 +35,11 @@ type Server struct {
 	server    *http.Server
 	mux       *http.ServeMux
 	config    config.ServerConfig
+	metrics   *observability.Metrics
 }
 
 // New creates a new HTTP API server
-func New(cfg config.ServerConfig, assistant *assistant.Assistant, logger *slog.Logger) (*Server, error) {
+func New(cfg config.ServerConfig, assistant *assistant.Assistant, logger *slog.Logger, metrics *observability.Metrics) (*Server, error) {
 	if assistant == nil {
 		return nil, fmt.Errorf("assistant is required")
 	}
@@ -50,6 +65,7 @@ func New(cfg config.ServerConfig, assistant *assistant.Assistant, logger *slog.L
 		logger:    observability.ServerLogger(logger, "http"),
 		server:    httpServer,
 		mux:       mux,
+		metrics:   metrics,
 	}
 
 	// Setup routes
@@ -98,7 +114,110 @@ func (s *Server) setupRoutes() {
 	handler := s.withMiddleware(s.mux)
 	s.server.Handler = handler
 
-	// API routes
+	// Get database queries
+	var sqlcQueries *sqlc.Queries
+	if s.assistant.GetDB() != nil {
+		sqlcQueries = s.assistant.GetDB().GetQueries()
+	}
+
+	// JWT secret for auth (in production, load from config)
+	jwtSecret := "your-secret-key-change-in-production"
+
+	// === Domain-Driven API Services ===
+
+	// Auth Service
+	authService := auth.NewAuthService(sqlcQueries, s.logger, s.metrics, jwtSecret)
+	authHandler := auth.NewHTTPHandler(authService)
+	authHandler.RegisterRoutes(s.mux)
+
+	// Users Service
+	if sqlcQueries != nil {
+		usersService := users.NewUserService(sqlcQueries, s.logger, s.metrics)
+		usersHandler := users.NewHTTPHandler(usersService, s.logger)
+		usersHandler.RegisterRoutes(s.mux)
+	}
+
+	// Memory Service - 記憶系統 API
+	if sqlcQueries != nil {
+		memoryService := memory.NewMemoryService(sqlcQueries, s.logger, s.metrics)
+		memoryHandler := memory.NewHTTPHandler(memoryService, s.logger)
+		memoryHandler.RegisterRoutes(s.mux)
+	}
+
+	// Enhanced Conversation Service - 增強對話 API
+	if sqlcQueries != nil {
+		enhancedConvService := conversation.NewEnhancedConversationService(sqlcQueries, s.logger, s.metrics)
+		enhancedConvHandler := conversation.NewEnhancedHTTPHandler(enhancedConvService, s.logger)
+		enhancedConvHandler.RegisterEnhancedRoutes(s.mux)
+	}
+
+	// Enhanced Tools Service - 增強工具 API
+	enhancedToolsService := tools.NewEnhancedToolService(s.assistant, sqlcQueries, s.logger, s.metrics)
+	enhancedToolsHandler := tools.NewEnhancedHTTPHandler(enhancedToolsService, s.logger)
+	enhancedToolsHandler.RegisterEnhancedRoutes(s.mux)
+
+	// Tools Service
+	toolsService := tools.NewToolService(s.assistant, sqlcQueries, s.logger, s.metrics)
+	toolsHandler := tools.NewHTTPHandler(toolsService, s.logger)
+	toolsHandler.RegisterRoutes(s.mux)
+
+	// System Service
+	systemService := system.NewSystemService(s.assistant, sqlcQueries, s.logger, s.metrics)
+	systemHandler := system.NewHTTPHandler(systemService)
+	systemHandler.RegisterRoutes(s.mux)
+
+	// Conversation Service
+	conversationService := conversation.NewConversationService(s.assistant, sqlcQueries, s.logger, s.metrics)
+	conversationHandler := conversation.NewHTTPHandler(conversationService)
+	conversationHandler.RegisterRoutes(s.mux)
+
+	// WebSocket Service
+	wsService := websocket.NewWebSocketService(s.assistant, s.logger, s.metrics)
+	wsHandler := websocket.NewHTTPHandler(wsService, s.logger)
+	wsHandler.RegisterRoutes(s.mux)
+	// Start WebSocket background tasks
+	go wsService.Start(context.Background())
+
+	// Chat Service (API v1 compatible)
+	chatService := chat.NewChatService(s.assistant, s.logger, s.metrics)
+	chatHandler := chat.NewHTTPHandler(chatService)
+	chatHandler.RegisterRoutes(s.mux)
+
+	// Analytics Service (includes timeline and insights)
+	if sqlcQueries != nil {
+		analyticsService := analytics.NewAnalyticsService(sqlcQueries, s.logger, s.metrics)
+		analyticsHandler := analytics.NewHTTPHandler(analyticsService)
+		analyticsHandler.RegisterRoutes(s.mux)
+	}
+
+	// Knowledge Service
+	knowledgeService := knowledge.NewKnowledgeService(s.assistant, s.logger, s.metrics)
+	knowledgeHandler := knowledge.NewHTTPHandler(knowledgeService)
+	knowledgeHandler.RegisterRoutes(s.mux)
+
+	// Learning Service
+	if sqlcQueries != nil {
+		learningService := learning.NewLearningService(sqlcQueries, s.logger, s.metrics)
+		learningHandler := learning.NewHTTPHandler(learningService)
+		learningHandler.RegisterRoutes(s.mux)
+	}
+
+	// Collaboration Service
+	if sqlcQueries != nil {
+		collaborationService := collaboration.NewCollaborationService(sqlcQueries, s.logger, s.metrics)
+		collaborationHandler := collaboration.NewHTTPHandler(collaborationService)
+		collaborationHandler.RegisterRoutes(s.mux)
+	}
+
+	// LangChain Service (if available)
+	if langchainService := s.assistant.GetLangChainService(); langchainService != nil {
+		langchainSvc := langchain.NewLangChainService(langchainService, s.logger)
+		langchainHandler := langchain.NewHTTPHandler(langchainSvc, s.logger)
+		langchainHandler.RegisterRoutes(s.mux)
+		s.logger.Info("LangChain API routes registered")
+	}
+
+	// 保持向後相容的舊 API 路由
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/status", s.handleStatus)
 	s.mux.HandleFunc("POST /api/query", s.handleQuery)
@@ -108,6 +227,9 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/tools", s.handleListTools)
 	s.mux.HandleFunc("GET /api/tools/{name}", s.handleGetTool)
 	s.mux.HandleFunc("POST /api/tools/{name}/execute", s.handleExecuteTool)
+
+	// 根路由 - 提供 API 資訊
+	s.mux.HandleFunc("GET /", s.handleRoot)
 
 	s.logger.Debug("HTTP API routes configured")
 }
@@ -321,4 +443,42 @@ func (s *Server) handleExecuteTool(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSONResponse(w, http.StatusOK, result)
+}
+
+// handleRoot provides API information at the root endpoint
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	apiInfo := map[string]interface{}{
+		"name":        "Assistant API",
+		"version":     "v1.0.0",
+		"description": "智慧開發助手 API",
+		"endpoints": map[string]interface{}{
+			"health": "/api/health",
+			"status": "/api/status",
+			"v1": map[string]interface{}{
+				"base":          "/api/v1",
+				"chat":          "/api/v1/chat/completions",
+				"conversations": "/api/v1/conversations",
+				"memory":        "/api/v1/memory",
+				"knowledge":     "/api/v1/knowledge",
+				"skills":        "/api/v1/skills",
+				"tools":         "/api/v1/tools",
+			},
+		},
+		"documentation": map[string]interface{}{
+			"swagger": "/api/docs",
+			"openapi": "/api/openapi.json",
+		},
+		"features": []string{
+			"聊天完成（OpenAI 相容）",
+			"對話管理",
+			"記憶體系統",
+			"知識管理",
+			"技能執行",
+			"工具整合",
+			"即時串流",
+		},
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+	}
+
+	s.writeJSONResponse(w, http.StatusOK, apiInfo)
 }

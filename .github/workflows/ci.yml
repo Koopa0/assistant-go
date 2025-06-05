@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 env:
   GO_VERSION: "1.24"
@@ -36,7 +36,7 @@ jobs:
           go mod tidy
           # Use latest version that supports Go 1.24
           curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin latest
-          
+
       - name: Run golangci-lint (with typecheck disabled)
         run: |
           $(go env GOPATH)/bin/golangci-lint run --timeout=5m --disable=typecheck
@@ -61,7 +61,7 @@ jobs:
       postgres:
         image: pgvector/pgvector:pg15
         env:
-          POSTGRES_DB: goassistant_test
+          POSTGRES_DB: assistant_test
           POSTGRES_USER: test
           POSTGRES_PASSWORD: test
         options: >-
@@ -96,7 +96,7 @@ jobs:
 
       - name: Run unit tests
         env:
-          DATABASE_URL: postgres://test:test@localhost:5432/goassistant_test?sslmode=disable
+          DATABASE_URL: postgres://koopa@localhost:5432/assistant_test?sslmode=disable
           CLAUDE_API_KEY: test-key
           GEMINI_API_KEY: test-key
         run: go test -v -race -coverprofile=coverage.out ./...

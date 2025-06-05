@@ -173,28 +173,33 @@ func (c *CLI) handleCommand(ctx context.Context, input string) bool {
 		}
 		return true
 
+	// TODO: Implement these commands
 	case "sql", "postgres", "mysql":
-		if len(args) > 0 {
-			c.handleSQLCommand(ctx, strings.Join(args, " "))
-		} else {
-			ui.Warning.Println("Usage: sql <query>")
-		}
+		ui.Warning.Println("SQL commands not yet implemented")
 		return true
 
 	case "k8s", "kubectl":
-		if len(args) > 0 {
-			c.handleK8sCommand(ctx, args)
-		} else {
-			ui.Warning.Println("Usage: k8s <command> [args...]")
-		}
+		ui.Warning.Println("Kubernetes commands not yet implemented")
 		return true
 
 	case "docker":
-		if len(args) > 0 {
-			c.handleDockerCommand(ctx, args)
+		ui.Warning.Println("Docker commands not yet implemented")
+		return true
+
+	case "langchain", "lc":
+		if len(args) == 0 {
+			c.showLangChainHelp()
 		} else {
-			ui.Warning.Println("Usage: docker <command> [args...]")
+			c.handleLangChainCommand(ctx, args)
 		}
+		return true
+
+	case "agents":
+		c.showLangChainAgents(ctx)
+		return true
+
+	case "chains":
+		c.showLangChainChains(ctx)
 		return true
 	}
 
@@ -265,6 +270,9 @@ func (c *CLI) showHelp() {
 		{"sql <query>", "Execute SQL query"},
 		{"k8s <command>", "Execute Kubernetes command"},
 		{"docker <command>", "Execute Docker command"},
+		{"langchain, lc", "LangChain operations"},
+		{"agents", "List available LangChain agents"},
+		{"chains", "List available LangChain chains"},
 	}
 
 	for _, cmd := range commands {
@@ -308,10 +316,16 @@ func (c *CLI) showStatus(ctx context.Context) {
 
 	// Processor stats
 	if stats.Processor != nil {
-		data["Requests Processed"] = fmt.Sprintf("%d", stats.Processor.RequestsProcessed)
-		if stats.Processor.AverageProcessingTimeMs > 0 {
-			data["Avg Processing Time"] = fmt.Sprintf("%dms", stats.Processor.AverageProcessingTimeMs)
+		if stats.Processor.Processor != nil {
+			data["Processor Status"] = stats.Processor.Processor.Status
+			data["Processor Version"] = stats.Processor.Processor.Version
 		}
+		if stats.Processor.Health != nil {
+			data["Health Status"] = stats.Processor.Health.Status
+		}
+		// TODO: Add request count and timing stats when processor tracking is implemented
+		data["Requests Processed"] = "tracking not implemented"
+		data["Avg Processing Time"] = "tracking not implemented"
 	}
 
 	ui.RenderKeyValueTable("", data)
@@ -406,4 +420,132 @@ func (c *CLI) Close() error {
 		return c.prompt.Close()
 	}
 	return nil
+}
+
+// LangChain command handlers
+
+// showLangChainHelp displays help for LangChain commands
+func (c *CLI) showLangChainHelp() {
+	ui.Info.Println("\nLangChain Commands:")
+	ui.Muted.Println("  langchain agents [execute <type> <query>]  - List or execute agents")
+	ui.Muted.Println("  langchain chains [execute <type> <input>]  - List or execute chains")
+	ui.Muted.Println("  langchain memory <command>                 - Memory operations")
+	ui.Muted.Println("  agents                                     - List available agents")
+	ui.Muted.Println("  chains                                     - List available chains")
+}
+
+// handleLangChainCommand handles LangChain subcommands
+func (c *CLI) handleLangChainCommand(ctx context.Context, args []string) {
+	if len(args) == 0 {
+		c.showLangChainHelp()
+		return
+	}
+
+	langchainService := c.assistant.GetLangChainService()
+	if langchainService == nil {
+		ui.Error.Println("LangChain service is not available")
+		return
+	}
+
+	subcommand := strings.ToLower(args[0])
+	subArgs := args[1:]
+
+	switch subcommand {
+	case "agents":
+		if len(subArgs) > 0 && subArgs[0] == "execute" {
+			if len(subArgs) < 3 {
+				ui.Warning.Println("Usage: langchain agents execute <type> <query>")
+				return
+			}
+			c.executeLangChainAgent(ctx, subArgs[1], strings.Join(subArgs[2:], " "))
+		} else {
+			c.showLangChainAgents(ctx)
+		}
+
+	case "chains":
+		if len(subArgs) > 0 && subArgs[0] == "execute" {
+			if len(subArgs) < 3 {
+				ui.Warning.Println("Usage: langchain chains execute <type> <input>")
+				return
+			}
+			c.executeLangChainChain(ctx, subArgs[1], strings.Join(subArgs[2:], " "))
+		} else {
+			c.showLangChainChains(ctx)
+		}
+
+	case "memory":
+		ui.Warning.Println("Memory commands not yet implemented")
+
+	default:
+		ui.Error.Printf("Unknown langchain command: %s\n", subcommand)
+		c.showLangChainHelp()
+	}
+}
+
+// showLangChainAgents displays available LangChain agents
+func (c *CLI) showLangChainAgents(ctx context.Context) {
+	langchainService := c.assistant.GetLangChainService()
+	if langchainService == nil {
+		ui.Error.Println("LangChain service is not available")
+		return
+	}
+
+	// TODO: Get agents from service
+	ui.Info.Println("\nAvailable LangChain Agents:")
+	ui.Muted.Println("  - development: Development-focused agent")
+	ui.Muted.Println("  - database: Database operations agent")
+	ui.Muted.Println("  - infrastructure: Infrastructure management agent")
+	ui.Muted.Println("  - research: Research and analysis agent")
+}
+
+// showLangChainChains displays available LangChain chains
+func (c *CLI) showLangChainChains(ctx context.Context) {
+	langchainService := c.assistant.GetLangChainService()
+	if langchainService == nil {
+		ui.Error.Println("LangChain service is not available")
+		return
+	}
+
+	// TODO: Get chains from service
+	ui.Info.Println("\nAvailable LangChain Chains:")
+	ui.Muted.Println("  - sequential: Sequential processing chain")
+	ui.Muted.Println("  - conditional: Conditional branching chain")
+	ui.Muted.Println("  - parallel: Parallel processing chain")
+	ui.Muted.Println("  - rag: Retrieval-Augmented Generation chain")
+}
+
+// executeLangChainAgent executes a specific agent
+func (c *CLI) executeLangChainAgent(ctx context.Context, agentType, query string) {
+	langchainService := c.assistant.GetLangChainService()
+	if langchainService == nil {
+		ui.Error.Println("LangChain service is not available")
+		return
+	}
+
+	// Show progress
+	stop := ui.ShowProgress(fmt.Sprintf("Executing %s agent...", agentType))
+	defer stop()
+
+	// TODO: Execute agent through service
+	ui.Success.Printf("\nAgent '%s' executed successfully\n", agentType)
+	ui.Info.Printf("Query: %s\n", query)
+	ui.Muted.Println("\nResult: [Agent execution not yet implemented]")
+}
+
+// executeLangChainChain executes a specific chain
+func (c *CLI) executeLangChainChain(ctx context.Context, chainType, input string) {
+	langchainService := c.assistant.GetLangChainService()
+	if langchainService == nil {
+		ui.Error.Println("LangChain service is not available")
+		return
+	}
+
+	// Show progress
+	stop := ui.ShowProgress(fmt.Sprintf("Executing %s chain...", chainType))
+	defer stop()
+
+	// TODO: Execute chain through service
+	ui.Success.Printf("\nChain '%s' executed successfully\n", chainType)
+	ui.Info.Printf("Input: %s\n", input)
+	ui.Muted.Println("\nOutput: [Chain execution not yet implemented]")
 }

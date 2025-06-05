@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/pgvector/pgvector-go"
+	pgvector "github.com/pgvector/pgvector-go"
 )
 
 const CreateEmbedding = `-- name: CreateEmbedding :one
@@ -30,7 +30,7 @@ type CreateEmbeddingParams struct {
 	ContentType string          `json:"content_type"`
 	ContentID   pgtype.UUID     `json:"content_id"`
 	ContentText string          `json:"content_text"`
-	Embedding   string          `json:"embedding"`
+	Embedding   pgvector.Vector `json:"embedding"`
 	Metadata    json.RawMessage `json:"metadata"`
 }
 
@@ -214,7 +214,7 @@ LIMIT $4
 type SearchSimilarEmbeddingsParams struct {
 	Column1     pgvector.Vector `json:"column_1"`
 	ContentType string          `json:"content_type"`
-	Embedding   string          `json:"embedding"`
+	Embedding   pgvector.Vector `json:"embedding"`
 	Limit       int32           `json:"limit"`
 }
 
@@ -223,7 +223,7 @@ type SearchSimilarEmbeddingsRow struct {
 	ContentType string          `json:"content_type"`
 	ContentID   pgtype.UUID     `json:"content_id"`
 	ContentText string          `json:"content_text"`
-	Embedding   string          `json:"embedding"`
+	Embedding   pgvector.Vector `json:"embedding"`
 	Metadata    json.RawMessage `json:"metadata"`
 	CreatedAt   time.Time       `json:"created_at"`
 	Similarity  int32           `json:"similarity"`
@@ -281,7 +281,7 @@ LIMIT $3
 
 type SearchSimilarEmbeddingsAllTypesParams struct {
 	Column1   pgvector.Vector `json:"column_1"`
-	Embedding string          `json:"embedding"`
+	Embedding pgvector.Vector `json:"embedding"`
 	Limit     int32           `json:"limit"`
 }
 
@@ -290,7 +290,7 @@ type SearchSimilarEmbeddingsAllTypesRow struct {
 	ContentType string          `json:"content_type"`
 	ContentID   pgtype.UUID     `json:"content_id"`
 	ContentText string          `json:"content_text"`
-	Embedding   string          `json:"embedding"`
+	Embedding   pgvector.Vector `json:"embedding"`
 	Metadata    json.RawMessage `json:"metadata"`
 	CreatedAt   time.Time       `json:"created_at"`
 	Similarity  int32           `json:"similarity"`
@@ -336,7 +336,7 @@ type UpdateEmbeddingParams struct {
 	ContentType string          `json:"content_type"`
 	ContentID   pgtype.UUID     `json:"content_id"`
 	ContentText string          `json:"content_text"`
-	Embedding   string          `json:"embedding"`
+	Embedding   pgvector.Vector `json:"embedding"`
 	Metadata    json.RawMessage `json:"metadata"`
 }
 

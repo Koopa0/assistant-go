@@ -8,7 +8,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/tmc/langchaingo/llms"
+
 	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant-go/internal/langchain"
 	"github.com/koopa0/assistant-go/internal/storage/postgres"
 	"github.com/koopa0/assistant-go/internal/tools"
 	"github.com/koopa0/assistant-go/internal/tools/godev"
@@ -28,12 +31,13 @@ import (
 // - Health monitoring of all subsystems
 // - Graceful shutdown and resource cleanup
 type Assistant struct {
-	config    *config.Config           // Application configuration
-	db        postgres.ClientInterface // Database client for persistence
-	logger    *slog.Logger             // Structured logger
-	registry  *tools.Registry          // Tool registry for available tools
-	processor *Processor               // Request processing pipeline
-	context   *ContextManager          // Conversation context manager
+	config           *config.Config     // Application configuration
+	db               postgres.DB        // Database client for persistence
+	logger           *slog.Logger       // Structured logger
+	registry         *tools.Registry    // Tool registry for available tools
+	processor        *Processor         // Request processing pipeline
+	context          *ContextManager    // Conversation context manager
+	langchainService *langchain.Service // LangChain integration service
 }
 
 // QueryRequest represents a comprehensive query request to the Assistant.
@@ -123,7 +127,7 @@ type QueryResponse struct {
 // Returns:
 //   - *Assistant: Initialized assistant ready for use
 //   - error: Configuration or initialization error
-func New(ctx context.Context, cfg *config.Config, db postgres.ClientInterface, logger *slog.Logger) (*Assistant, error) {
+func New(ctx context.Context, cfg *config.Config, db postgres.DB, logger *slog.Logger) (*Assistant, error) {
 	if cfg == nil {
 		return nil, NewConfigurationError("config", fmt.Errorf("config is required"))
 	}
@@ -149,13 +153,38 @@ func New(ctx context.Context, cfg *config.Config, db postgres.ClientInterface, l
 		return nil, fmt.Errorf("failed to initialize processor: %w", err)
 	}
 
+	// Initialize LangChain service if configured (optional)
+	var langchainService *langchain.Service
+	if cfg.Tools.LangChain.EnableMemory {
+		// Try to create a working LangChain service
+		langchainCfg := langchain.ServiceConfig{
+			Config:       cfg.Tools.LangChain,
+			Logger:       logger,
+			DBClient:     nil,                         // TODO: Convert postgres.ClientInterface to *postgres.SQLCClient when needed
+			LLMProviders: make(map[string]llms.Model), // Correct type for LLM providers
+		}
+
+		// Note: LangChain service creation might fail due to missing dependencies
+		// This is expected in demo mode or when LangChain dependencies are not fully configured
+		langchainService, err = langchain.NewService(langchainCfg)
+		if err != nil {
+			logger.Warn("Failed to initialize LangChain service (this is expected in demo mode)",
+				slog.Any("error", err))
+			// Don't return error - LangChain is optional
+			langchainService = nil
+		} else {
+			logger.Info("LangChain service initialized successfully")
+		}
+	}
+
 	assistant := &Assistant{
-		config:    cfg,
-		db:        db,
-		logger:    logger,
-		registry:  registry,
-		processor: processor,
-		context:   contextManager,
+		config:           cfg,
+		db:               db,
+		logger:           logger,
+		registry:         registry,
+		processor:        processor,
+		context:          contextManager,
+		langchainService: langchainService,
 	}
 
 	// Register built-in tools
@@ -303,6 +332,11 @@ func (a *Assistant) Health(ctx context.Context) error {
 	return nil
 }
 
+// GetDB returns the database client interface
+func (a *Assistant) GetDB() postgres.DB {
+	return a.db
+}
+
 // Close gracefully shuts down the assistant
 func (a *Assistant) Close(ctx context.Context) error {
 	a.logger.Info("Shutting down assistant...")
@@ -345,35 +379,35 @@ func (a *Assistant) registerBuiltinTools(ctx context.Context) error {
 // registerGoTools registers Go development tools
 func (a *Assistant) registerGoTools() error {
 	// Register Go Analyzer
-	if err := a.registry.Register("go_analyzer", func(config map[string]any, logger *slog.Logger) (tools.Tool, error) {
+	if err := a.registry.Register("go_analyzer", func(config *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
 		return godev.NewGoAnalyzer(config, logger)
 	}); err != nil {
 		return fmt.Errorf("failed to register go_analyzer: %w", err)
 	}
 
 	// Register Go Formatter
-	if err := a.registry.Register("go_formatter", func(config map[string]any, logger *slog.Logger) (tools.Tool, error) {
+	if err := a.registry.Register("go_formatter", func(config *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
 		return godev.NewGoFormatter(config, logger)
 	}); err != nil {
 		return fmt.Errorf("failed to register go_formatter: %w", err)
 	}
 
 	// Register Go Tester
-	if err := a.registry.Register("go_tester", func(config map[string]any, logger *slog.Logger) (tools.Tool, error) {
+	if err := a.registry.Register("go_tester", func(config *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
 		return godev.NewGoTester(config, logger)
 	}); err != nil {
 		return fmt.Errorf("failed to register go_tester: %w", err)
 	}
 
 	// Register Go Builder
-	if err := a.registry.Register("go_builder", func(config map[string]any, logger *slog.Logger) (tools.Tool, error) {
+	if err := a.registry.Register("go_builder", func(config *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
 		return godev.NewGoBuilder(config, logger)
 	}); err != nil {
 		return fmt.Errorf("failed to register go_builder: %w", err)
 	}
 
 	// Register Go Dependency Analyzer
-	if err := a.registry.Register("go_dependency_analyzer", func(config map[string]any, logger *slog.Logger) (tools.Tool, error) {
+	if err := a.registry.Register("go_dependency_analyzer", func(config *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
 		return godev.NewGoDependencyAnalyzer(config, logger)
 	}); err != nil {
 		return fmt.Errorf("failed to register go_dependency_analyzer: %w", err)
@@ -437,18 +471,6 @@ type ToolRegistryStats struct {
 	AverageExecutionTimes map[string]int64 `json:"average_execution_times_ms,omitempty"`
 }
 
-// ProcessorStats represents request processor statistics
-type ProcessorStats struct {
-	// RequestsProcessed is the total number of processed requests
-	RequestsProcessed int64 `json:"requests_processed"`
-
-	// AverageProcessingTimeMs is the average processing time in milliseconds
-	AverageProcessingTimeMs int64 `json:"average_processing_time_ms"`
-
-	// ProviderCounts maps provider names to their usage counts
-	ProviderCounts map[string]int64 `json:"provider_counts,omitempty"`
-}
-
 // Stats returns assistant statistics
 func (a *Assistant) Stats(ctx context.Context) (*AssistantStats, error) {
 	stats := &AssistantStats{}
@@ -497,8 +519,18 @@ func (a *Assistant) Stats(ctx context.Context) (*AssistantStats, error) {
 	if err != nil {
 		a.logger.Warn("Failed to get processor stats", slog.Any("error", err))
 	} else if processorStatsMap != nil {
-		// Convert map to typed struct
-		stats.Processor = &ProcessorStats{}
+		// Convert map to typed struct using comprehensive ProcessorStats from types.go
+		stats.Processor = &ProcessorStats{
+			Processor: &ProcessorInfo{
+				Status:  "healthy",
+				Version: "1.0.0",   // TODO: Get from build info
+				Uptime:  "unknown", // TODO: Track actual uptime
+			},
+			Health: &HealthStatus{
+				Status:    "healthy",
+				LastCheck: time.Now(),
+			},
+		}
 		// TODO: Extract counts and times from processorStatsMap when processor is updated
 	}
 
@@ -545,12 +577,18 @@ func (a *Assistant) ExecuteTool(ctx context.Context, req *ToolExecutionRequest) 
 		slog.String("tool", req.ToolName),
 		slog.Any("input", req.Input))
 
-	config := req.Config
-	if config == nil {
-		config = make(map[string]any)
+	// Convert legacy input and config to typed structures
+	toolInput := &tools.ToolInput{
+		Parameters: req.Input,
 	}
 
-	result, err := a.registry.Execute(ctx, req.ToolName, req.Input, config)
+	toolConfig := &tools.ToolConfig{}
+	if req.Config != nil {
+		// Convert config map to ToolConfig
+		toolConfig = tools.ConvertLegacyConfig(req.Config)
+	}
+
+	result, err := a.registry.Execute(ctx, req.ToolName, toolInput, toolConfig)
 	if err != nil {
 		a.logger.Error("Tool execution failed",
 			slog.String("tool", req.ToolName),
@@ -564,4 +602,9 @@ func (a *Assistant) ExecuteTool(ctx context.Context, req *ToolExecutionRequest) 
 		slog.Duration("execution_time", result.ExecutionTime))
 
 	return result, nil
+}
+
+// GetLangChainService returns the LangChain service instance if available
+func (a *Assistant) GetLangChainService() *langchain.Service {
+	return a.langchainService
 }

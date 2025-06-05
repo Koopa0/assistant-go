@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"go.opentelemetry.io/otel/trace"
 )
 
 // LogLevel represents the logging level
@@ -147,24 +149,28 @@ func NewLogger(w io.Writer, level LogLevel, format LogFormat) *slog.Logger {
 	return slog.New(handler)
 }
 
-// WithContext creates a logger with context values
+// WithContext creates a logger with context values following golang_guide.md OpenTelemetry best practices
 func WithContext(ctx context.Context, logger *slog.Logger) *slog.Logger {
 	attrs := make([]slog.Attr, 0)
 
+	// Extract OpenTelemetry trace information (golang_guide.md pattern for Loki integration)
+	if span := trace.SpanFromContext(ctx); span.SpanContext().IsValid() {
+		spanCtx := span.SpanContext()
+		attrs = append(attrs,
+			slog.String("trace_id", spanCtx.TraceID().String()),
+			slog.String("span_id", spanCtx.SpanID().String()),
+		)
+	}
+
+	// Add low-cardinality context values (following golang_guide.md Loki labeling strategy)
 	if requestID := ctx.Value(RequestIDKey); requestID != nil {
+		// Store detailed information in log content, not as labels
 		attrs = append(attrs, slog.String("request_id", requestID.(string)))
 	}
 
+	// Avoid high-cardinality labels for Loki - store in content instead
 	if userID := ctx.Value(UserIDKey); userID != nil {
 		attrs = append(attrs, slog.String("user_id", userID.(string)))
-	}
-
-	if traceID := ctx.Value(TraceIDKey); traceID != nil {
-		attrs = append(attrs, slog.String("trace_id", traceID.(string)))
-	}
-
-	if spanID := ctx.Value(SpanIDKey); spanID != nil {
-		attrs = append(attrs, slog.String("span_id", spanID.(string)))
 	}
 
 	if len(attrs) == 0 {

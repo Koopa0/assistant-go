@@ -9,12 +9,16 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/koopa0/assistant-go/internal/storage/postgres/sqlc"
 )
 
 // MockClient is a mock implementation of the Client interface for testing
 type MockClient struct {
 	logger *slog.Logger
 }
+
+// Ensure MockClient implements the DB interface
+var _ DB = (*MockClient)(nil)
 
 // NewMockClient creates a new mock database client
 func NewMockClient(logger *slog.Logger) *MockClient {
@@ -24,19 +28,19 @@ func NewMockClient(logger *slog.Logger) *MockClient {
 }
 
 // Query implements the database query method
-func (m *MockClient) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+func (m *MockClient) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	m.logger.Debug("Mock query executed", slog.String("sql", sql))
 	return &mockRows{}, nil
 }
 
 // QueryRow implements the database query row method
-func (m *MockClient) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+func (m *MockClient) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	m.logger.Debug("Mock query row executed", slog.String("sql", sql))
 	return &mockRow{}
 }
 
 // Exec implements the database exec method
-func (m *MockClient) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
+func (m *MockClient) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	m.logger.Debug("Mock exec executed", slog.String("sql", sql))
 	return pgconn.NewCommandTag(""), nil
 }
@@ -100,10 +104,31 @@ func (m *MockClient) Close() error {
 	return nil
 }
 
+// GetQueries returns nil for mock implementation
+func (m *MockClient) GetQueries() *sqlc.Queries {
+	return nil
+}
+
 // Migrate runs mock database migrations
 func (m *MockClient) Migrate(ctx context.Context) error {
 	m.logger.Info("Mock database migrations completed")
 	return nil
+}
+
+// DatabaseInfo returns mock database information
+func (m *MockClient) DatabaseInfo(ctx context.Context) (*DatabaseInfo, error) {
+	return &DatabaseInfo{
+		Version: "PostgreSQL 15.0 (Mock)",
+		Connections: struct {
+			Active int32 `json:"active"`
+			Idle   int32 `json:"idle"`
+			Max    int32 `json:"max"`
+		}{
+			Active: 1,
+			Idle:   0,
+			Max:    10,
+		},
+	}, nil
 }
 
 // mockRows implements pgx.Rows interface

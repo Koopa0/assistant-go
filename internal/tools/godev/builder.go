@@ -22,10 +22,18 @@ type GoBuilder struct {
 }
 
 // NewGoBuilder creates a new Go builder tool
-func NewGoBuilder(config map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+func NewGoBuilder(config *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
+	// Convert ToolConfig to legacy map format for now
+	legacyConfig := make(map[string]interface{})
+	if config != nil {
+		legacyConfig["timeout"] = config.Timeout
+		legacyConfig["debug"] = config.Debug
+		legacyConfig["working_dir"] = config.WorkingDir
+	}
+
 	return &GoBuilder{
 		logger: logger,
-		config: config,
+		config: legacyConfig,
 	}, nil
 }
 
@@ -40,120 +48,117 @@ func (g *GoBuilder) Description() string {
 }
 
 // Parameters returns the tool parameters schema
-func (g *GoBuilder) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"path": map[string]interface{}{
-				"type":        "string",
-				"description": "Path to the main package to build",
-				"default":     ".",
+func (g *GoBuilder) Parameters() *tools.ToolParametersSchema {
+	return &tools.ToolParametersSchema{
+		Type: "object",
+		Properties: map[string]tools.ToolParameter{
+			"path": {
+				Type:        "string",
+				Description: "Path to the main package to build",
+				Default:     ".",
 			},
-			"output": map[string]interface{}{
-				"type":        "string",
-				"description": "Output binary path/name",
-				"default":     "",
+			"output": {
+				Type:        "string",
+				Description: "Output binary path/name",
+				Default:     "",
 			},
-			"target_os": map[string]interface{}{
-				"type":        "string",
-				"description": "Target operating system (GOOS)",
-				"default":     runtime.GOOS,
+			"target_os": {
+				Type:        "string",
+				Description: "Target operating system (GOOS)",
+				Default:     runtime.GOOS,
 			},
-			"target_arch": map[string]interface{}{
-				"type":        "string",
-				"description": "Target architecture (GOARCH)",
-				"default":     runtime.GOARCH,
+			"target_arch": {
+				Type:        "string",
+				Description: "Target architecture (GOARCH)",
+				Default:     runtime.GOARCH,
 			},
-			"build_mode": map[string]interface{}{
-				"type":        "string",
-				"description": "Build mode (exe, c-archive, c-shared, default, shared, pie)",
-				"default":     "default",
+			"build_mode": {
+				Type:        "string",
+				Description: "Build mode (exe, c-archive, c-shared, default, shared, pie)",
+				Default:     "default",
 			},
-			"ldflags": map[string]interface{}{
-				"type":        "string",
-				"description": "Linker flags (e.g., -s -w for smaller binaries)",
-				"default":     "",
+			"ldflags": {
+				Type:        "string",
+				Description: "Linker flags (e.g., -s -w for smaller binaries)",
+				Default:     "",
 			},
-			"tags": map[string]interface{}{
-				"type":        "array",
-				"description": "Build tags to include",
-				"items": map[string]interface{}{
-					"type": "string",
-				},
-				"default": []string{},
+			"tags": {
+				Type:        "array",
+				Description: "Build tags to include",
+				Default:     []string{},
 			},
-			"trimpath": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Remove file system paths from binary",
-				"default":     false,
+			"trimpath": {
+				Type:        "boolean",
+				Description: "Remove file system paths from binary",
+				Default:     false,
 			},
-			"race": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Enable race detector",
-				"default":     false,
+			"race": {
+				Type:        "boolean",
+				Description: "Enable race detector",
+				Default:     false,
 			},
-			"mod": map[string]interface{}{
-				"type":        "string",
-				"description": "Module download mode (readonly, vendor, mod)",
-				"default":     "",
+			"mod": {
+				Type:        "string",
+				Description: "Module download mode (readonly, vendor, mod)",
+				Default:     "",
 			},
-			"clean": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Clean build cache before building",
-				"default":     false,
+			"clean": {
+				Type:        "boolean",
+				Description: "Clean build cache before building",
+				Default:     false,
 			},
-			"install": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Install the binary to GOPATH/bin",
-				"default":     false,
+			"install": {
+				Type:        "boolean",
+				Description: "Install the binary to GOPATH/bin",
+				Default:     false,
 			},
-			"static": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Build static binary (CGO_ENABLED=0)",
-				"default":     false,
+			"static": {
+				Type:        "boolean",
+				Description: "Build static binary (CGO_ENABLED=0)",
+				Default:     false,
 			},
 		},
-		"required": []string{},
+		Required: []string{},
 	}
 }
 
 // Execute executes the Go builder
-func (g *GoBuilder) Execute(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+func (g *GoBuilder) Execute(ctx context.Context, input *tools.ToolInput) (*tools.ToolResult, error) {
 	startTime := time.Now()
 
 	// Parse input parameters
 	path := "."
-	if p, ok := input["path"].(string); ok && p != "" {
+	if p, ok := input.Parameters["path"].(string); ok && p != "" {
 		path = p
 	}
 
 	output := ""
-	if o, ok := input["output"].(string); ok {
+	if o, ok := input.Parameters["output"].(string); ok {
 		output = o
 	}
 
 	targetOS := runtime.GOOS
-	if os, ok := input["target_os"].(string); ok && os != "" {
+	if os, ok := input.Parameters["target_os"].(string); ok && os != "" {
 		targetOS = os
 	}
 
 	targetArch := runtime.GOARCH
-	if arch, ok := input["target_arch"].(string); ok && arch != "" {
+	if arch, ok := input.Parameters["target_arch"].(string); ok && arch != "" {
 		targetArch = arch
 	}
 
 	buildMode := "default"
-	if mode, ok := input["build_mode"].(string); ok && mode != "" {
+	if mode, ok := input.Parameters["build_mode"].(string); ok && mode != "" {
 		buildMode = mode
 	}
 
 	ldflags := ""
-	if flags, ok := input["ldflags"].(string); ok {
+	if flags, ok := input.Parameters["ldflags"].(string); ok {
 		ldflags = flags
 	}
 
 	tags := []string{}
-	if t, ok := input["tags"].([]interface{}); ok {
+	if t, ok := input.Parameters["tags"].([]interface{}); ok {
 		for _, tag := range t {
 			if tagStr, ok := tag.(string); ok {
 				tags = append(tags, tagStr)
@@ -162,32 +167,32 @@ func (g *GoBuilder) Execute(ctx context.Context, input map[string]interface{}) (
 	}
 
 	trimpath := false
-	if trim, ok := input["trimpath"].(bool); ok {
+	if trim, ok := input.Parameters["trimpath"].(bool); ok {
 		trimpath = trim
 	}
 
 	race := false
-	if r, ok := input["race"].(bool); ok {
+	if r, ok := input.Parameters["race"].(bool); ok {
 		race = r
 	}
 
 	mod := ""
-	if m, ok := input["mod"].(string); ok {
+	if m, ok := input.Parameters["mod"].(string); ok {
 		mod = m
 	}
 
 	clean := false
-	if c, ok := input["clean"].(bool); ok {
+	if c, ok := input.Parameters["clean"].(bool); ok {
 		clean = c
 	}
 
 	install := false
-	if i, ok := input["install"].(bool); ok {
+	if i, ok := input.Parameters["install"].(bool); ok {
 		install = i
 	}
 
 	static := false
-	if s, ok := input["static"].(bool); ok {
+	if s, ok := input.Parameters["static"].(bool); ok {
 		static = s
 	}
 
@@ -210,26 +215,38 @@ func (g *GoBuilder) Execute(ctx context.Context, input map[string]interface{}) (
 	result, err := g.buildApplication(ctx, path, output, targetOS, targetArch, buildMode,
 		ldflags, tags, trimpath, race, mod, install, static)
 	if err != nil {
+		// Convert BuildResult to ToolResultData even for errors
+		toolData := convertBuildResultToToolData(result)
 		return &tools.ToolResult{
 			Success:       false,
 			Error:         err.Error(),
 			ExecutionTime: time.Since(startTime),
-			Data:          result,
+			Data:          toolData,
 		}, err
 	}
 
-	return &tools.ToolResult{
-		Success: true,
-		Data:    result,
-		Metadata: map[string]interface{}{
-			"path":           path,
-			"output":         output,
-			"target_os":      targetOS,
-			"target_arch":    targetArch,
-			"build_mode":     buildMode,
-			"static":         static,
-			"execution_time": time.Since(startTime).String(),
+	// Convert BuildResult to ToolResultData
+	toolData := convertBuildResultToToolData(result)
+
+	// Create metadata
+	metadata := &tools.ToolMetadata{
+		StartTime:     startTime,
+		EndTime:       time.Now(),
+		ExecutionTime: time.Since(startTime),
+		Parameters: map[string]string{
+			"path":        path,
+			"output":      output,
+			"target_os":   targetOS,
+			"target_arch": targetArch,
+			"build_mode":  buildMode,
+			"static":      fmt.Sprintf("%t", static),
 		},
+	}
+
+	return &tools.ToolResult{
+		Success:       true,
+		Data:          toolData,
+		Metadata:      metadata,
 		ExecutionTime: time.Since(startTime),
 	}, nil
 }
@@ -552,4 +569,24 @@ func (g *GoBuilder) getModuleDependencies(ctx context.Context, path string) ([]M
 	}
 
 	return deps, nil
+}
+
+// convertBuildResultToToolData converts GoBuilder BuildResult to ToolResultData
+func convertBuildResultToToolData(buildResult *BuildResult) *tools.ToolResultData {
+	return &tools.ToolResultData{
+		Build: &tools.BuildResult{
+			Success:    buildResult.Success,
+			BinaryPath: buildResult.BinaryPath,
+			BinarySize: buildResult.BinarySize,
+			BuildTime:  buildResult.BuildTime,
+			Output:     buildResult.Output,
+			Metadata: map[string]interface{}{
+				"go_version":      buildResult.GoVersion,
+				"target_platform": buildResult.TargetPlatform,
+				"build_info":      buildResult.BuildInfo,
+				"dependencies":    buildResult.Dependencies,
+			},
+		},
+		LinesProcessed: int64(len(strings.Split(buildResult.Output, "\n"))),
+	}
 }

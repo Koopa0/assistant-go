@@ -1,0 +1,288 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/koopa0/assistant-go/internal/assistant"
+	"github.com/koopa0/assistant-go/internal/cli/ui"
+	"github.com/koopa0/assistant-go/internal/config"
+)
+
+// handleSQLCommand handles SQL-specific commands
+func (c *CLI) handleSQLCommand(ctx context.Context, query string) {
+	// Format and display the query
+	fmt.Println()
+	ui.SQLKeyword.Println("SQL Query:")
+	fmt.Println(ui.FormatSQLQuery(query))
+	fmt.Println()
+
+	// Simulate query execution (in real implementation, this would use the SQL tool)
+	stop := ui.ShowProgress("Executing query...")
+	time.Sleep(1 * time.Second) // Simulate execution
+	stop()
+
+	// Display sample results
+	headers := []string{"id", "name", "email", "created_at"}
+	rows := [][]string{
+		{"1", "John Doe", "john@example.com", "2024-01-15 10:30:00"},
+		{"2", "Jane Smith", "jane@example.com", "2024-01-16 14:45:00"},
+		{"3", "Bob Wilson", "bob@example.com", "2024-01-17 09:15:00"},
+	}
+
+	ui.RenderSQLTable(headers, rows)
+}
+
+// handleK8sCommand handles Kubernetes-specific commands
+func (c *CLI) handleK8sCommand(ctx context.Context, args []string) {
+	if len(args) == 0 {
+		ui.Error.Println("No Kubernetes command specified")
+		return
+	}
+
+	command := args[0]
+
+	switch command {
+	case "get":
+		if len(args) < 2 {
+			ui.Error.Println("Resource type required")
+			return
+		}
+		c.handleK8sGet(ctx, args[1], args[2:])
+
+	case "describe":
+		if len(args) < 3 {
+			ui.Error.Println("Resource type and name required")
+			return
+		}
+		c.handleK8sDescribe(ctx, args[1], args[2])
+
+	case "logs":
+		if len(args) < 2 {
+			ui.Error.Println("Pod name required")
+			return
+		}
+		c.handleK8sLogs(ctx, args[1])
+
+	default:
+		ui.Error.Printf("Unknown Kubernetes command: %s\n", command)
+	}
+}
+
+// handleK8sGet handles 'k8s get' command
+func (c *CLI) handleK8sGet(ctx context.Context, resourceType string, args []string) {
+	namespace := "default"
+	for i, arg := range args {
+		if arg == "-n" || arg == "--namespace" {
+			if i+1 < len(args) {
+				namespace = args[i+1]
+			}
+		}
+	}
+
+	// Display namespace info
+	fmt.Println()
+	ui.K8sNamespace.Printf("Namespace: %s\n", namespace)
+
+	// Simulate getting resources
+	stop := ui.ShowProgress(fmt.Sprintf("Getting %s...", resourceType))
+	time.Sleep(500 * time.Millisecond)
+	stop()
+
+	// Display sample results based on resource type
+	switch resourceType {
+	case "pods", "pod":
+		headers := []string{"NAME", "READY", "STATUS", "RESTARTS", "AGE"}
+		rows := [][]string{
+			{"nginx-deployment-5d59d67564-8g7nm", "1/1", "Running", "0", "2d"},
+			{"nginx-deployment-5d59d67564-9x4jk", "1/1", "Running", "0", "2d"},
+			{"postgres-0", "1/1", "Running", "1", "5d"},
+			{"redis-master-0", "1/1", "Running", "0", "3d"},
+		}
+		ui.RenderK8sTable("pods", headers, rows)
+
+	case "services", "service", "svc":
+		headers := []string{"NAME", "TYPE", "CLUSTER-IP", "EXTERNAL-IP", "PORT(S)", "AGE"}
+		rows := [][]string{
+			{"nginx-service", "LoadBalancer", "10.96.134.231", "34.123.45.67", "80:30080/TCP", "2d"},
+			{"postgres", "ClusterIP", "10.96.200.123", "<none>", "5432/TCP", "5d"},
+			{"redis-master", "ClusterIP", "10.96.150.45", "<none>", "6379/TCP", "3d"},
+		}
+		ui.RenderK8sTable("services", headers, rows)
+
+	case "deployments", "deployment", "deploy":
+		headers := []string{"NAME", "READY", "UP-TO-DATE", "AVAILABLE", "AGE"}
+		rows := [][]string{
+			{"nginx-deployment", "2/2", "2", "2", "2d"},
+			{"backend-api", "3/3", "3", "3", "5d"},
+			{"frontend", "1/1", "1", "1", "3d"},
+		}
+		ui.RenderK8sTable("deployments", headers, rows)
+
+	default:
+		ui.Warning.Printf("Resource type '%s' not implemented in demo\n", resourceType)
+	}
+}
+
+// handleK8sDescribe handles 'k8s describe' command
+func (c *CLI) handleK8sDescribe(ctx context.Context, resourceType, name string) {
+	// Simulate describe
+	stop := ui.ShowProgress(fmt.Sprintf("Describing %s %s...", resourceType, name))
+	time.Sleep(300 * time.Millisecond)
+	stop()
+
+	fmt.Println()
+	ui.K8sResource.Printf("%s: %s\n", strings.Title(resourceType), name)
+	fmt.Println(ui.Divider())
+
+	// Show sample describe output
+	data := map[string]string{
+		"Name":        name,
+		"Namespace":   "default",
+		"Labels":      "app=nginx,env=production",
+		"Annotations": "<none>",
+		"Status":      ui.K8sStatus.Sprint("Running"),
+		"IP":          "10.244.1.23",
+		"Node":        "worker-node-1",
+		"Started":     "2024-01-15 10:30:00",
+	}
+
+	ui.RenderKeyValueTable("", data)
+	fmt.Println()
+}
+
+// handleK8sLogs handles 'k8s logs' command
+func (c *CLI) handleK8sLogs(ctx context.Context, podName string) {
+	// Simulate fetching logs
+	stop := ui.ShowProgress(fmt.Sprintf("Fetching logs for %s...", podName))
+	time.Sleep(500 * time.Millisecond)
+	stop()
+
+	fmt.Println()
+	ui.K8sResource.Printf("Logs for pod: %s\n", podName)
+	fmt.Println(ui.Divider())
+
+	// Show sample logs
+	logs := []string{
+		"2024-01-20 10:30:45 INFO  Starting application...",
+		"2024-01-20 10:30:46 INFO  Loading configuration from /etc/app/config.yaml",
+		"2024-01-20 10:30:46 INFO  Connecting to database...",
+		"2024-01-20 10:30:47 INFO  Database connection established",
+		"2024-01-20 10:30:47 INFO  Starting HTTP server on :8080",
+		"2024-01-20 10:30:48 INFO  Server is ready to handle requests",
+	}
+
+	for _, log := range logs {
+		fmt.Println(log)
+	}
+	fmt.Println()
+}
+
+// handleDockerCommand handles Docker-specific commands
+func (c *CLI) handleDockerCommand(ctx context.Context, args []string) {
+	if len(args) == 0 {
+		ui.Error.Println("No Docker command specified")
+		return
+	}
+
+	command := args[0]
+
+	switch command {
+	case "ps":
+		c.handleDockerPS(ctx, args[1:])
+
+	case "images":
+		c.handleDockerImages(ctx)
+
+	case "logs":
+		if len(args) < 2 {
+			ui.Error.Println("Container name/ID required")
+			return
+		}
+		c.handleDockerLogs(ctx, args[1])
+
+	default:
+		ui.Error.Printf("Unknown Docker command: %s\n", command)
+	}
+}
+
+// handleDockerPS handles 'docker ps' command
+func (c *CLI) handleDockerPS(ctx context.Context, args []string) {
+	showAll := false
+	for _, arg := range args {
+		if arg == "-a" || arg == "--all" {
+			showAll = true
+			break
+		}
+	}
+
+	// Simulate listing containers
+	stop := ui.ShowProgress("Listing containers...")
+	time.Sleep(300 * time.Millisecond)
+	stop()
+
+	headers := []string{"CONTAINER ID", "IMAGE", "COMMAND", "STATUS", "PORTS", "NAMES"}
+	rows := [][]string{
+		{"a1b2c3d4e5f6", "nginx:latest", "nginx -g daemon...", ui.DockerRunning.Sprint("Up 2 days"), "0.0.0.0:80->80/tcp", "web-server"},
+		{"b2c3d4e5f6g7", "postgres:13", "docker-entrypoint...", ui.DockerRunning.Sprint("Up 5 days"), "5432/tcp", "database"},
+		{"c3d4e5f6g7h8", "redis:6-alpine", "redis-server", ui.DockerRunning.Sprint("Up 3 days"), "6379/tcp", "cache"},
+	}
+
+	if showAll {
+		rows = append(rows, []string{
+			"d4e5f6g7h8i9", "node:14", "node app.js", ui.DockerStopped.Sprint("Exited (0) 1 day ago"), "", "old-app"},
+		)
+	}
+
+	ui.RenderDockerTable("containers", headers, rows)
+	fmt.Println()
+}
+
+// handleDockerImages handles 'docker images' command
+func (c *CLI) handleDockerImages(ctx context.Context) {
+	// Simulate listing images
+	stop := ui.ShowProgress("Listing images...")
+	time.Sleep(300 * time.Millisecond)
+	stop()
+
+	headers := []string{"REPOSITORY", "TAG", "IMAGE ID", "CREATED", "SIZE"}
+	rows := [][]string{
+		{"nginx", "latest", "605c77e624dd", "2 weeks ago", ui.FormatDockerSize(141000000)},
+		{"postgres", "13", "ceccf204404e", "3 weeks ago", ui.FormatDockerSize(374000000)},
+		{"redis", "6-alpine", "3e42dd4e79c7", "1 month ago", ui.FormatDockerSize(32200000)},
+		{"node", "14", "91a5d3b2c0a8", "2 months ago", ui.FormatDockerSize(943000000)},
+		{"python", "3.9-slim", "4f7cd4269fa9", "1 week ago", ui.FormatDockerSize(124000000)},
+	}
+
+	ui.RenderDockerTable("images", headers, rows)
+	fmt.Println()
+}
+
+// handleDockerLogs handles 'docker logs' command
+func (c *CLI) handleDockerLogs(ctx context.Context, container string) {
+	// Simulate fetching logs
+	stop := ui.ShowProgress(fmt.Sprintf("Fetching logs for %s...", container))
+	time.Sleep(500 * time.Millisecond)
+	stop()
+
+	fmt.Println()
+	ui.DockerContainer.Printf("Logs for container: %s\n", container)
+	fmt.Println(ui.Divider())
+
+	// Show sample logs
+	logs := []string{
+		"172.17.0.1 - - [20/Jan/2024:10:30:45 +0000] \"GET / HTTP/1.1\" 200 612",
+		"172.17.0.1 - - [20/Jan/2024:10:30:46 +0000] \"GET /favicon.ico HTTP/1.1\" 404 153",
+		"172.17.0.1 - - [20/Jan/2024:10:31:02 +0000] \"GET /api/health HTTP/1.1\" 200 15",
+		"172.17.0.1 - - [20/Jan/2024:10:31:15 +0000] \"POST /api/users HTTP/1.1\" 201 125",
+		"172.17.0.1 - - [20/Jan/2024:10:31:20 +0000] \"GET /api/users/123 HTTP/1.1\" 200 245",
+	}
+
+	for _, log := range logs {
+		fmt.Println(log)
+	}
+	fmt.Println()
+}

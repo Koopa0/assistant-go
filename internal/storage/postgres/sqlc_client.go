@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/koopa0/assistant-go/internal/storage/postgres/sqlc"
+	"github.com/pgvector/pgvector-go"
 )
 
 // SQLCClient wraps the sqlc-generated queries with our domain types
@@ -40,6 +39,11 @@ func (c *SQLCClient) Health(ctx context.Context) error {
 func (c *SQLCClient) Close() error {
 	c.pool.Close()
 	return nil
+}
+
+// GetQueries returns the underlying sqlc.Queries for direct access
+func (c *SQLCClient) GetQueries() *sqlc.Queries {
+	return c.queries
 }
 
 // Conversation domain methods
@@ -95,13 +99,8 @@ func (c *SQLCClient) GetConversationsByUser(ctx context.Context, userID string, 
 		return nil, fmt.Errorf("invalid user ID: %w", err)
 	}
 
-	params := sqlc.GetConversationsByUserParams{
-		UserID: userUUID,
-		Limit:  int32(limit),
-		Offset: int32(offset),
-	}
-
-	sqlcConvs, err := c.queries.GetConversationsByUser(ctx, params)
+	// GetConversationsByUser 現在只需要 userID 參數
+	sqlcConvs, err := c.queries.GetConversationsByUser(ctx, userUUID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get conversations: %w", err)
 	}
@@ -192,7 +191,7 @@ func (c *SQLCClient) CreateEmbedding(ctx context.Context, contentType, contentID
 		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	embeddingStr := c.vectorToString(embedding)
+	embeddingVector := c.vectorToPgVector(embedding)
 
 	contentUUID, err := c.parseUUID(contentID)
 	if err != nil {
@@ -203,7 +202,7 @@ func (c *SQLCClient) CreateEmbedding(ctx context.Context, contentType, contentID
 		ContentType: contentType,
 		ContentID:   contentUUID,
 		ContentText: contentText,
-		Embedding:   embeddingStr,
+		Embedding:   embeddingVector,
 		Metadata:    metadataJSON,
 	}
 
@@ -266,48 +265,33 @@ func (c *SQLCClient) uuidToString(uuid pgtype.UUID) string {
 		uuid.Bytes[10:16])
 }
 
-func (c *SQLCClient) vectorToString(vector []float64) string {
+func (c *SQLCClient) vectorToPgVector(vector []float64) pgvector.Vector {
 	if len(vector) == 0 {
-		return "[]"
+		return pgvector.NewVector([]float32{})
 	}
 
-	parts := make([]string, len(vector))
+	// Convert float64 to float32 for pgvector
+	float32Vector := make([]float32, len(vector))
 	for i, v := range vector {
-		parts[i] = strconv.FormatFloat(v, 'f', 6, 64)
+		float32Vector[i] = float32(v)
 	}
 
-	return "[" + strings.Join(parts, ",") + "]"
+	return pgvector.NewVector(float32Vector)
 }
 
-func (c *SQLCClient) stringToVector(vectorStr string) []float64 {
-	if vectorStr == "" || vectorStr == "[]" {
+func (c *SQLCClient) pgVectorToVector(pgvec pgvector.Vector) []float64 {
+	slice := pgvec.Slice()
+	if len(slice) == 0 {
 		return make([]float64, 0)
 	}
 
-	// Remove brackets and split by comma
-	vectorStr = strings.Trim(vectorStr, "[]")
-	parts := strings.Split(vectorStr, ",")
-
-	vector := make([]float64, 0, len(parts))
-	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
-			continue
-		}
-
-		value, err := strconv.ParseFloat(part, 64)
-		if err != nil {
-			c.logger.Warn("Failed to parse vector component",
-				slog.String("component", part),
-				slog.String("vector_string", vectorStr),
-				slog.Any("error", err))
-			continue
-		}
-
-		vector = append(vector, value)
+	// Convert float32 to float64
+	float64Vector := make([]float64, len(slice))
+	for i, v := range slice {
+		float64Vector[i] = float64(v)
 	}
 
-	return vector
+	return float64Vector
 }
 
 func (c *SQLCClient) convertSQLCConversation(sqlcConv *sqlc.Conversation) *Conversation {
@@ -330,7 +314,7 @@ func (c *SQLCClient) convertSQLCConversation(sqlcConv *sqlc.Conversation) *Conve
 	}
 }
 
-func (c *SQLCClient) convertSQLCConversationRow(sqlcConv *sqlc.CreateConversationRow) *Conversation {
+func (c *SQLCClient) convertSQLCConversationRow(sqlcConv *sqlc.Conversation) *Conversation {
 	var metadata map[string]interface{}
 	if len(sqlcConv.Metadata) > 0 {
 		json.Unmarshal(sqlcConv.Metadata, &metadata)
@@ -389,7 +373,7 @@ func (c *SQLCClient) convertSQLCEmbedding(sqlcEmb *sqlc.Embedding) *EmbeddingRec
 		ContentType: sqlcEmb.ContentType,
 		ContentID:   c.uuidToString(sqlcEmb.ContentID),
 		ContentText: sqlcEmb.ContentText,
-		Embedding:   c.stringToVector(sqlcEmb.Embedding),
+		Embedding:   c.pgVectorToVector(sqlcEmb.Embedding),
 		Metadata:    metadata,
 		CreatedAt:   sqlcEmb.CreatedAt,
 	}
@@ -446,14 +430,8 @@ func (c *SQLCClient) GetMemoryEntriesByUser(ctx context.Context, userID string, 
 		return nil, fmt.Errorf("invalid user ID: %w", err)
 	}
 
-	params := sqlc.GetMemoryEntriesByUserParams{
-		Column1: userUUID, // user_id parameter
-		Column2: memoryTypes,
-		Limit:   int32(limit),
-		Offset:  int32(offset),
-	}
-
-	sqlcEntries, err := c.queries.GetMemoryEntriesByUser(ctx, params)
+	// GetMemoryEntriesByUser 現在只需要 userID 參數
+	sqlcEntries, err := c.queries.GetMemoryEntriesByUser(ctx, userUUID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get memory entries: %w", err)
 	}
@@ -1024,7 +1002,7 @@ func (c *SQLCClient) convertSQLCUserContext(sqlcCtx *sqlc.UserContext) *UserCont
 
 // Additional conversion functions for different SQLC row types
 
-func (c *SQLCClient) convertSQLCConversationFromGetRow(sqlcConv *sqlc.GetConversationRow) *Conversation {
+func (c *SQLCClient) convertSQLCConversationFromGetRow(sqlcConv *sqlc.Conversation) *Conversation {
 	var metadata map[string]interface{}
 	if len(sqlcConv.Metadata) > 0 {
 		json.Unmarshal(sqlcConv.Metadata, &metadata)
@@ -1044,7 +1022,7 @@ func (c *SQLCClient) convertSQLCConversationFromGetRow(sqlcConv *sqlc.GetConvers
 	}
 }
 
-func (c *SQLCClient) convertSQLCConversationFromGetByUserRow(sqlcConv *sqlc.GetConversationsByUserRow) *Conversation {
+func (c *SQLCClient) convertSQLCConversationFromGetByUserRow(sqlcConv *sqlc.Conversation) *Conversation {
 	var metadata map[string]interface{}
 	if len(sqlcConv.Metadata) > 0 {
 		json.Unmarshal(sqlcConv.Metadata, &metadata)

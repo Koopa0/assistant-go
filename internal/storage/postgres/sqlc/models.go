@@ -9,7 +9,39 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	pgvector "github.com/pgvector/pgvector-go"
 )
+
+type AgentCollaboration struct {
+	ID                  pgtype.UUID        `json:"id"`
+	UserID              pgtype.UUID        `json:"user_id"`
+	SessionID           string             `json:"session_id"`
+	LeadAgentID         pgtype.UUID        `json:"lead_agent_id"`
+	ParticipatingAgents []pgtype.UUID      `json:"participating_agents"`
+	CollaborationType   string             `json:"collaboration_type"`
+	TaskDescription     string             `json:"task_description"`
+	TaskComplexity      pgtype.Float8      `json:"task_complexity"`
+	CollaborationPlan   []byte             `json:"collaboration_plan"`
+	ExecutionTrace      []byte             `json:"execution_trace"`
+	Outcome             pgtype.Text        `json:"outcome"`
+	TotalDurationMs     pgtype.Int4        `json:"total_duration_ms"`
+	ResourceUsage       []byte             `json:"resource_usage"`
+	CreatedAt           time.Time          `json:"created_at"`
+	CompletedAt         pgtype.Timestamptz `json:"completed_at"`
+}
+
+type AgentDefinition struct {
+	ID                       pgtype.UUID `json:"id"`
+	AgentName                string      `json:"agent_name"`
+	AgentType                string      `json:"agent_type"`
+	Capabilities             []byte      `json:"capabilities"`
+	ExpertiseDomains         []string    `json:"expertise_domains"`
+	CollaborationPreferences []byte      `json:"collaboration_preferences"`
+	PerformanceMetrics       []byte      `json:"performance_metrics"`
+	IsActive                 pgtype.Bool `json:"is_active"`
+	CreatedAt                time.Time   `json:"created_at"`
+	UpdatedAt                time.Time   `json:"updated_at"`
+}
 
 type AgentExecution struct {
 	ID              pgtype.UUID     `json:"id"`
@@ -24,6 +56,19 @@ type AgentExecution struct {
 	ErrorMessage    pgtype.Text     `json:"error_message"`
 	CreatedAt       time.Time       `json:"created_at"`
 	Metadata        json.RawMessage `json:"metadata"`
+}
+
+type AgentKnowledgeShare struct {
+	ID                pgtype.UUID   `json:"id"`
+	SourceAgentID     pgtype.UUID   `json:"source_agent_id"`
+	TargetAgentID     pgtype.UUID   `json:"target_agent_id"`
+	KnowledgeType     string        `json:"knowledge_type"`
+	KnowledgeContent  []byte        `json:"knowledge_content"`
+	RelevanceScore    pgtype.Float8 `json:"relevance_score"`
+	WasAccepted       pgtype.Bool   `json:"was_accepted"`
+	IntegrationResult []byte        `json:"integration_result"`
+	CollaborationID   pgtype.UUID   `json:"collaboration_id"`
+	CreatedAt         time.Time     `json:"created_at"`
 }
 
 type AgentSession struct {
@@ -82,6 +127,21 @@ type CloudflareAccount struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
+type CodePattern struct {
+	ID               pgtype.UUID        `json:"id"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	PatternCategory  string             `json:"pattern_category"`
+	PatternName      string             `json:"pattern_name"`
+	PatternAst       []byte             `json:"pattern_ast"`
+	UsageContexts    []string           `json:"usage_contexts"`
+	Frequency        pgtype.Int4        `json:"frequency"`
+	LastUsed         pgtype.Timestamptz `json:"last_used"`
+	EvolutionHistory []byte             `json:"evolution_history"`
+	QualityScore     pgtype.Float8      `json:"quality_score"`
+	CreatedAt        time.Time          `json:"created_at"`
+	UpdatedAt        time.Time          `json:"updated_at"`
+}
+
 type Conversation struct {
 	ID         pgtype.UUID     `json:"id"`
 	UserID     pgtype.UUID     `json:"user_id"`
@@ -105,6 +165,22 @@ type DatabaseConnection struct {
 	UpdatedAt        time.Time       `json:"updated_at"`
 }
 
+type DevelopmentSession struct {
+	ID                   pgtype.UUID        `json:"id"`
+	UserID               pgtype.UUID        `json:"user_id"`
+	SessionType          string             `json:"session_type"`
+	ProjectContext       []byte             `json:"project_context"`
+	Goals                []string           `json:"goals"`
+	ActualOutcomes       []string           `json:"actual_outcomes"`
+	InterruptionCount    pgtype.Int4        `json:"interruption_count"`
+	FocusScore           pgtype.Float8      `json:"focus_score"`
+	ProductivityMetrics  []byte             `json:"productivity_metrics"`
+	MoodIndicators       []byte             `json:"mood_indicators"`
+	StartedAt            pgtype.Timestamptz `json:"started_at"`
+	EndedAt              pgtype.Timestamptz `json:"ended_at"`
+	TotalDurationMinutes pgtype.Int4        `json:"total_duration_minutes"`
+}
+
 type DockerConnection struct {
 	ID         pgtype.UUID     `json:"id"`
 	UserID     pgtype.UUID     `json:"user_id"`
@@ -124,9 +200,86 @@ type Embedding struct {
 	ContentType string          `json:"content_type"`
 	ContentID   pgtype.UUID     `json:"content_id"`
 	ContentText string          `json:"content_text"`
-	Embedding   string          `json:"embedding"`
+	Embedding   pgvector.Vector `json:"embedding"`
 	Metadata    json.RawMessage `json:"metadata"`
 	CreatedAt   time.Time       `json:"created_at"`
+}
+
+type EpisodicMemory struct {
+	ID               pgtype.UUID        `json:"id"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	EpisodeType      string             `json:"episode_type"`
+	EpisodeSummary   string             `json:"episode_summary"`
+	FullContext      []byte             `json:"full_context"`
+	EmotionalValence pgtype.Float8      `json:"emotional_valence"`
+	Importance       float64            `json:"importance"`
+	Vividness        pgtype.Float8      `json:"vividness"`
+	Embedding        pgvector.Vector    `json:"embedding"`
+	TemporalContext  []byte             `json:"temporal_context"`
+	SpatialContext   []byte             `json:"spatial_context"`
+	SocialContext    []byte             `json:"social_context"`
+	CausalLinks      []pgtype.UUID      `json:"causal_links"`
+	AccessCount      pgtype.Int4        `json:"access_count"`
+	LastAccessed     pgtype.Timestamptz `json:"last_accessed"`
+	CreatedAt        time.Time          `json:"created_at"`
+	DecayRate        pgtype.Float8      `json:"decay_rate"`
+}
+
+type EventProjection struct {
+	ID                   pgtype.UUID        `json:"id"`
+	ProjectionName       string             `json:"projection_name"`
+	LastProcessedEventID pgtype.UUID        `json:"last_processed_event_id"`
+	LastProcessedAt      pgtype.Timestamptz `json:"last_processed_at"`
+	ProjectionState      []byte             `json:"projection_state"`
+	ErrorCount           pgtype.Int4        `json:"error_count"`
+	LastError            pgtype.Text        `json:"last_error"`
+	CreatedAt            time.Time          `json:"created_at"`
+	UpdatedAt            time.Time          `json:"updated_at"`
+}
+
+type KnowledgeEdge struct {
+	ID            pgtype.UUID        `json:"id"`
+	UserID        pgtype.UUID        `json:"user_id"`
+	SourceNodeID  pgtype.UUID        `json:"source_node_id"`
+	TargetNodeID  pgtype.UUID        `json:"target_node_id"`
+	EdgeType      string             `json:"edge_type"`
+	Strength      pgtype.Float8      `json:"strength"`
+	Properties    []byte             `json:"properties"`
+	EvidenceCount pgtype.Int4        `json:"evidence_count"`
+	LastObserved  pgtype.Timestamptz `json:"last_observed"`
+	CreatedAt     time.Time          `json:"created_at"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+	IsActive      pgtype.Bool        `json:"is_active"`
+}
+
+type KnowledgeEvolution struct {
+	ID            pgtype.UUID   `json:"id"`
+	UserID        pgtype.UUID   `json:"user_id"`
+	EntityType    string        `json:"entity_type"`
+	EntityID      pgtype.UUID   `json:"entity_id"`
+	ChangeType    string        `json:"change_type"`
+	PreviousState []byte        `json:"previous_state"`
+	NewState      []byte        `json:"new_state"`
+	ChangeReason  pgtype.Text   `json:"change_reason"`
+	Confidence    pgtype.Float8 `json:"confidence"`
+	CreatedAt     time.Time     `json:"created_at"`
+}
+
+type KnowledgeNode struct {
+	ID              pgtype.UUID        `json:"id"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	NodeType        string             `json:"node_type"`
+	NodeName        string             `json:"node_name"`
+	DisplayName     pgtype.Text        `json:"display_name"`
+	Description     pgtype.Text        `json:"description"`
+	Properties      []byte             `json:"properties"`
+	Embedding       pgvector.Vector    `json:"embedding"`
+	Importance      pgtype.Float8      `json:"importance"`
+	AccessFrequency pgtype.Float8      `json:"access_frequency"`
+	LastAccessed    pgtype.Timestamptz `json:"last_accessed"`
+	CreatedAt       time.Time          `json:"created_at"`
+	UpdatedAt       time.Time          `json:"updated_at"`
+	IsActive        pgtype.Bool        `json:"is_active"`
 }
 
 type KubernetesCluster struct {
@@ -140,6 +293,40 @@ type KubernetesCluster struct {
 	Metadata   json.RawMessage `json:"metadata"`
 	CreatedAt  time.Time       `json:"created_at"`
 	UpdatedAt  time.Time       `json:"updated_at"`
+}
+
+type LearnedPattern struct {
+	ID               pgtype.UUID        `json:"id"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	PatternType      string             `json:"pattern_type"`
+	PatternName      string             `json:"pattern_name"`
+	PatternSignature []byte             `json:"pattern_signature"`
+	PatternData      []byte             `json:"pattern_data"`
+	Confidence       float64            `json:"confidence"`
+	OccurrenceCount  pgtype.Int4        `json:"occurrence_count"`
+	PositiveOutcomes pgtype.Int4        `json:"positive_outcomes"`
+	NegativeOutcomes pgtype.Int4        `json:"negative_outcomes"`
+	LastObserved     pgtype.Timestamptz `json:"last_observed"`
+	IsActive         pgtype.Bool        `json:"is_active"`
+	CreatedAt        time.Time          `json:"created_at"`
+	UpdatedAt        time.Time          `json:"updated_at"`
+}
+
+type LearningEvent struct {
+	ID               pgtype.UUID   `json:"id"`
+	UserID           pgtype.UUID   `json:"user_id"`
+	EventType        string        `json:"event_type"`
+	Context          []byte        `json:"context"`
+	InputData        []byte        `json:"input_data"`
+	OutputData       []byte        `json:"output_data"`
+	Outcome          pgtype.Text   `json:"outcome"`
+	Confidence       pgtype.Float8 `json:"confidence"`
+	FeedbackScore    pgtype.Int4   `json:"feedback_score"`
+	LearningMetadata []byte        `json:"learning_metadata"`
+	DurationMs       pgtype.Int4   `json:"duration_ms"`
+	CreatedAt        time.Time     `json:"created_at"`
+	SessionID        pgtype.Text   `json:"session_id"`
+	CorrelationID    pgtype.UUID   `json:"correlation_id"`
 }
 
 type MemoryEntry struct {
@@ -166,6 +353,26 @@ type Message struct {
 	CreatedAt      time.Time       `json:"created_at"`
 }
 
+type ProceduralMemory struct {
+	ID                   pgtype.UUID        `json:"id"`
+	UserID               pgtype.UUID        `json:"user_id"`
+	ProcedureName        string             `json:"procedure_name"`
+	ProcedureType        string             `json:"procedure_type"`
+	TriggerConditions    []byte             `json:"trigger_conditions"`
+	Steps                []byte             `json:"steps"`
+	Prerequisites        []byte             `json:"prerequisites"`
+	ExpectedOutcomes     []byte             `json:"expected_outcomes"`
+	SuccessRate          pgtype.Float8      `json:"success_rate"`
+	ExecutionCount       pgtype.Int4        `json:"execution_count"`
+	AverageDurationMs    pgtype.Int4        `json:"average_duration_ms"`
+	OptimizationHistory  []byte             `json:"optimization_history"`
+	IsAutomated          pgtype.Bool        `json:"is_automated"`
+	AutomationConfidence pgtype.Float8      `json:"automation_confidence"`
+	LastExecuted         pgtype.Timestamptz `json:"last_executed"`
+	CreatedAt            time.Time          `json:"created_at"`
+	UpdatedAt            time.Time          `json:"updated_at"`
+}
+
 type SearchCache struct {
 	ID        pgtype.UUID        `json:"id"`
 	QueryHash string             `json:"query_hash"`
@@ -174,6 +381,39 @@ type SearchCache struct {
 	Source    string             `json:"source"`
 	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt time.Time          `json:"created_at"`
+}
+
+type SemanticMemory struct {
+	ID                 pgtype.UUID        `json:"id"`
+	UserID             pgtype.UUID        `json:"user_id"`
+	KnowledgeType      string             `json:"knowledge_type"`
+	Subject            string             `json:"subject"`
+	Predicate          string             `json:"predicate"`
+	Object             []byte             `json:"object"`
+	Confidence         float64            `json:"confidence"`
+	SourceType         pgtype.Text        `json:"source_type"`
+	SourceReferences   []pgtype.UUID      `json:"source_references"`
+	Embedding          pgvector.Vector    `json:"embedding"`
+	ContradictionCount pgtype.Int4        `json:"contradiction_count"`
+	ConfirmationCount  pgtype.Int4        `json:"confirmation_count"`
+	LastConfirmed      pgtype.Timestamptz `json:"last_confirmed"`
+	IsActive           pgtype.Bool        `json:"is_active"`
+	CreatedAt          time.Time          `json:"created_at"`
+	UpdatedAt          time.Time          `json:"updated_at"`
+}
+
+type SystemEvent struct {
+	ID              pgtype.UUID        `json:"id"`
+	EventType       string             `json:"event_type"`
+	AggregateType   string             `json:"aggregate_type"`
+	AggregateID     pgtype.UUID        `json:"aggregate_id"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	EventData       []byte             `json:"event_data"`
+	EventMetadata   []byte             `json:"event_metadata"`
+	EventVersion    int32              `json:"event_version"`
+	CreatedAt       time.Time          `json:"created_at"`
+	ProcessedAt     pgtype.Timestamptz `json:"processed_at"`
+	ProcessingError pgtype.Text        `json:"processing_error"`
 }
 
 type ToolCache struct {
@@ -243,4 +483,35 @@ type UserPreference struct {
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 	Metadata        json.RawMessage `json:"metadata"`
+}
+
+type UserSkill struct {
+	ID               pgtype.UUID        `json:"id"`
+	UserID           pgtype.UUID        `json:"user_id"`
+	SkillCategory    string             `json:"skill_category"`
+	SkillName        string             `json:"skill_name"`
+	ProficiencyLevel float64            `json:"proficiency_level"`
+	ExperiencePoints pgtype.Int4        `json:"experience_points"`
+	SuccessfulUses   pgtype.Int4        `json:"successful_uses"`
+	TotalUses        pgtype.Int4        `json:"total_uses"`
+	LastUsed         pgtype.Timestamptz `json:"last_used"`
+	LearningCurve    []byte             `json:"learning_curve"`
+	RelatedPatterns  []pgtype.UUID      `json:"related_patterns"`
+	CreatedAt        time.Time          `json:"created_at"`
+	UpdatedAt        time.Time          `json:"updated_at"`
+}
+
+type WorkingMemory struct {
+	ID              pgtype.UUID        `json:"id"`
+	UserID          pgtype.UUID        `json:"user_id"`
+	SessionID       string             `json:"session_id"`
+	MemorySlot      int32              `json:"memory_slot"`
+	ContentType     string             `json:"content_type"`
+	Content         []byte             `json:"content"`
+	ActivationLevel pgtype.Float8      `json:"activation_level"`
+	ReferenceCount  pgtype.Int4        `json:"reference_count"`
+	LinkedMemories  []pgtype.UUID      `json:"linked_memories"`
+	CreatedAt       time.Time          `json:"created_at"`
+	LastAccessed    pgtype.Timestamptz `json:"last_accessed"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
 }

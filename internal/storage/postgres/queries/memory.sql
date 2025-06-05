@@ -20,10 +20,8 @@ WHERE id = $1;
 -- name: GetMemoryEntriesByUser :many
 SELECT * FROM memory_entries
 WHERE user_id = $1::uuid
-  AND (memory_type = ANY($2::text[]) OR $2 IS NULL)
   AND (expires_at IS NULL OR expires_at > NOW())
-ORDER BY importance DESC, last_access DESC
-LIMIT $3 OFFSET $4;
+ORDER BY importance DESC, last_access DESC;
 
 -- name: GetMemoryEntriesBySession :many
 SELECT * FROM memory_entries
@@ -44,12 +42,11 @@ SET content = $2,
 WHERE id = $1
 RETURNING *;
 
--- name: IncrementMemoryAccess :one
+-- name: IncrementMemoryAccess :exec
 UPDATE memory_entries
-SET access_count = access_count + 1,
-    last_access = NOW()
-WHERE id = $1
-RETURNING *;
+SET access_count = $2,
+    last_access = $3
+WHERE id = $1;
 
 -- name: DeleteMemoryEntry :exec
 DELETE FROM memory_entries

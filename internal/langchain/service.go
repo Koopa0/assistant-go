@@ -8,8 +8,8 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 
+	"github.com/koopa0/assistant-go/internal/agent"
 	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/langchain/agents"
 	"github.com/koopa0/assistant-go/internal/langchain/chains"
 	"github.com/koopa0/assistant-go/internal/langchain/memory"
 	"github.com/koopa0/assistant-go/internal/storage/postgres"
@@ -25,11 +25,9 @@ type Service struct {
 	memoryManager *memory.MemoryManager
 	chainManager  *chains.ChainManager
 
-	// Agent instances
-	developmentAgent    *agents.DevelopmentAgent
-	databaseAgent       *agents.DatabaseAgent
-	infrastructureAgent *agents.InfrastructureAgent
-	researchAgent       *agents.ResearchAgent
+	// Agent instances with LangChain adapters
+	agentManager *agent.SimpleManager
+	agents       map[agent.AgentType]*agent.LangChainAdapter
 
 	// LLM providers
 	llmProviders map[string]llms.Model

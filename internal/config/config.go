@@ -157,11 +157,11 @@ type SecurityConfig struct {
 }
 
 // String returns a string representation of the Config, with sensitive data masked
-func (c *Config) String() string {
+func (c Config) String() string {
 	return "<Config with masked sensitive data>"
 }
 
 // Validate validates the AI configuration
-func (cfg *AIConfig) Validate() error {
-	return validateAI(*cfg)
+func (cfg AIConfig) Validate() error {
+	return validateAI(cfg)
 }

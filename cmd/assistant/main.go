@@ -95,8 +95,18 @@ func main() {
 			slog.String("mode", cfg.Mode))
 	}
 
+	// Handle migration commands early (before full database init)
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		if len(os.Args) < 3 {
+			fmt.Fprintf(os.Stderr, "Usage: %s migrate <up|down|status>\n", os.Args[0])
+			os.Exit(1)
+		}
+		runMigrate(ctx, cfg, logger, os.Args[2])
+		return
+	}
+
 	// Initialize database connection
-	var db postgres.ClientInterface
+	var db postgres.DB
 
 	// Check if we're in test/demo mode or quiet mode
 	if os.Getenv("ASSISTANT_DEMO_MODE") == "true" || cfg.Database.URL == "" || isQuietMode {
@@ -174,8 +184,15 @@ func runWebServer(ctx context.Context, cfg *config.Config, assistant *assistant.
 		}
 	}()
 
+	// Initialize metrics
+	metrics, err := observability.NewMetrics("assistant")
+	if err != nil {
+		logger.Error("Failed to initialize metrics", slog.Any("error", err))
+		os.Exit(1)
+	}
+
 	// Initialize web server
-	srv, err := server.New(cfg.Server, assistant, logger)
+	srv, err := server.New(cfg.Server, assistant, logger, metrics)
 	if err != nil {
 		logger.Error("Failed to initialize server", slog.Any("error", err))
 		os.Exit(1)
@@ -239,6 +256,59 @@ func runDirectQuery(ctx context.Context, assistant *assistant.Assistant, query s
 	fmt.Println(response)
 }
 
+func runMigrate(ctx context.Context, cfg *config.Config, logger *slog.Logger, command string) {
+	// Initialize database connection for migration
+	client, err := postgres.NewClient(ctx, cfg.Database)
+	if err != nil {
+		logger.Error("Failed to initialize database for migration", slog.Any("error", err))
+		os.Exit(1)
+	}
+	defer client.Close()
+
+	migrator := postgres.NewMigrator(client, cfg.Database.MigrationsPath)
+
+	switch command {
+	case "up":
+		logger.Info("Running database migrations...")
+		if err := migrator.Up(ctx); err != nil {
+			logger.Error("Migration failed", slog.Any("error", err))
+			os.Exit(1)
+		}
+		logger.Info("Migrations completed successfully")
+	case "down":
+		logger.Info("Rolling back last migration...")
+		if err := migrator.Down(ctx); err != nil {
+			logger.Error("Migration rollback failed", slog.Any("error", err))
+			os.Exit(1)
+		}
+		logger.Info("Migration rolled back successfully")
+	case "status":
+		logger.Info("Checking migration status...")
+		status, err := migrator.Status(ctx)
+		if err != nil {
+			logger.Error("Failed to get migration status", slog.Any("error", err))
+			os.Exit(1)
+		}
+
+		fmt.Println("Migration Status:")
+		fmt.Println("================")
+		for _, migration := range status {
+			status := "Pending"
+			appliedAt := "Not applied"
+			if migration.AppliedAt != nil {
+				status = "Applied"
+				appliedAt = migration.AppliedAt.Format("2006-01-02 15:04:05")
+			}
+			fmt.Printf("Version %d: %s [%s] - %s\n",
+				migration.Version, migration.Name, status, appliedAt)
+		}
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown migration command: %s\n", command)
+		fmt.Fprintf(os.Stderr, "Available commands: up, down, status\n")
+		os.Exit(1)
+	}
+}
+
 func printUsage() {
 	fmt.Printf(`%s %s - AI-powered development assistant
 
@@ -249,6 +319,7 @@ Commands:
   serve, server         Start API server (default)
   cli, interactive      Start interactive CLI mode
   ask <question>        Ask a direct question
+  migrate <up|down|status>  Database migration commands
   version              Show version information
   help                 Show this help message
 

@@ -1,0 +1,555 @@
+package assistant
+
+import (
+	"context"
+	"errors"
+	"log/slog"
+	"math/rand"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/koopa0/assistant-go/internal/ai"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+// createTestLogger creates a test logger
+func createTestLogger(level slog.Level) *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+}
+
+// testDataFactory provides factory methods for creating test data
+type testDataFactory struct {
+	rand *rand.Rand
+}
+
+// newTestDataFactory creates a new test data factory
+func newTestDataFactory() *testDataFactory {
+	return &testDataFactory{
+		rand: rand.New(rand.NewSource(time.Now().UnixNano())),
+	}
+}
+
+// GenerateID generates a test ID
+func (f *testDataFactory) GenerateID() string {
+	return "test-id-" + time.Now().Format("20060102150405")
+}
+
+// GenerateUserID generates a test user ID
+func (f *testDataFactory) GenerateUserID() string {
+	return "user-" + time.Now().Format("20060102150405")
+}
+
+// CreateAssistantRequest creates a test assistant request
+func (f *testDataFactory) CreateAssistantRequest(options ...func(*Request)) *Request {
+	req := &Request{
+		ID:        f.GenerateID(),
+		UserID:    f.GenerateUserID(),
+		Message:   "Test message",
+		Timestamp: time.Now(),
+		Metadata: map[string]interface{}{
+			"test": true,
+		},
+	}
+
+	for _, option := range options {
+		option(req)
+	}
+
+	return req
+}
+
+// TestErrorHandling_Comprehensive tests various error scenarios
+func TestErrorHandling_Comprehensive(t *testing.T) {
+	logger := createTestLogger(slog.LevelDebug)
+	factory := newTestDataFactory()
+
+	tests := []struct {
+		name            string
+		setupError      func() (ai.Manager, error)
+		request         *Request
+		expectedError   string
+		errorType       string
+		shouldRetry     bool
+		timeoutExpected bool
+	}{
+		{
+			name: "ai_provider_unavailable",
+			setupError: func() (ai.Manager, error) {
+				aiManager := testutil.NewMockAIManager(logger)
+				aiManager.EnableErrorSimulation(1.0) // 100% error rate
+				return aiManager, nil
+			},
+			request: factory.CreateAssistantRequest(
+				testutil.WithMessage("test message"),
+			),
+			expectedError: "simulated AI provider error",
+			errorType:     "ai_provider_error",
+			shouldRetry:   true,
+		},
+		{
+			name: "context_timeout",
+			setupError: func() (ai.Manager, error) {
+				aiManager := testutil.NewMockAIManager(logger)
+				// Set up a slow response
+				aiManager.SetCustomResponseFunc(func(ctx context.Context, request *ai.GenerateRequest, providerName ...string) (*ai.GenerateResponse, error) {
+					select {
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					case <-time.After(2 * time.Second):
+						return factory.CreateAIGenerateResponse(), nil
+					}
+				})
+				return aiManager, nil
+			},
+			request: factory.CreateAssistantRequest(
+				testutil.WithMessage("slow request"),
+			),
+			expectedError:   "context deadline exceeded",
+			errorType:       "timeout_error",
+			shouldRetry:     false,
+			timeoutExpected: true,
+		},
+		{
+			name: "invalid_request_format",
+			setupError: func() (ai.Manager, error) {
+				return testutil.NewMockAIManager(logger), nil
+			},
+			request: &Request{
+				ID:      "", // Invalid empty ID
+				UserID:  "",
+				Message: "",
+			},
+			expectedError: "invalid request",
+			errorType:     "validation_error",
+			shouldRetry:   false,
+		},
+		{
+			name: "ai_response_parsing_error",
+			setupError: func() (ai.Manager, error) {
+				aiManager := testutil.NewMockAIManager(logger)
+				aiManager.SetCustomResponseFunc(func(ctx context.Context, request *ai.GenerateRequest, providerName ...string) (*ai.GenerateResponse, error) {
+					// Return malformed response
+					return &ai.GenerateResponse{
+						Content:  "", // Empty content
+						Model:    "",
+						Provider: "",
+					}, nil
+				})
+				return aiManager, nil
+			},
+			request: factory.CreateAssistantRequest(
+				testutil.WithMessage("test message"),
+			),
+			expectedError: "empty response content",
+			errorType:     "response_error",
+			shouldRetry:   false,
+		},
+		{
+			name: "rate_limit_exceeded",
+			setupError: func() (ai.Manager, error) {
+				aiManager := testutil.NewMockAIManager(logger)
+				aiManager.SetCustomResponseFunc(func(ctx context.Context, request *ai.GenerateRequest, providerName ...string) (*ai.GenerateResponse, error) {
+					return nil, errors.New("rate limit exceeded")
+				})
+				return aiManager, nil
+			},
+			request: factory.CreateAssistantRequest(
+				testutil.WithMessage("rate limited request"),
+			),
+			expectedError: "rate limit exceeded",
+			errorType:     "rate_limit_error",
+			shouldRetry:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup
+			aiManager, err := tt.setupError()
+			require.NoError(t, err, "Setup should not fail")
+
+			// Create context with timeout if needed
+			ctx := context.Background()
+			if tt.timeoutExpected {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, 100*time.Millisecond)
+				defer cancel()
+			}
+
+			// Create assistant (simplified for testing)
+			assistant := &Assistant{
+				aiManager: aiManager,
+				logger:    logger,
+			}
+
+			// Execute
+			response, err := assistant.ProcessRequest(ctx, tt.request)
+
+			// Verify error occurred
+			assert.Error(t, err, "Should return error")
+			assert.Nil(t, response, "Response should be nil on error")
+			assert.Contains(t, err.Error(), tt.expectedError, "Error message should contain expected text")
+
+			// Verify error properties
+			if assistantErr, ok := err.(*AssistantError); ok {
+				assert.Equal(t, tt.errorType, assistantErr.Type, "Error type should match")
+				assert.Equal(t, tt.shouldRetry, assistantErr.Retryable, "Retry flag should match")
+			}
+		})
+	}
+}
+
+// AssistantError represents a structured error from the assistant
+type AssistantError struct {
+	Type      string
+	Message   string
+	Retryable bool
+	Cause     error
+}
+
+func (e *AssistantError) Error() string {
+	return e.Message
+}
+
+func (e *AssistantError) Unwrap() error {
+	return e.Cause
+}
+
+// TestErrorWrapping tests proper error wrapping and unwrapping
+func TestErrorWrapping(t *testing.T) {
+	originalErr := errors.New("original error")
+
+	wrappedErr := &AssistantError{
+		Type:      "test_error",
+		Message:   "wrapped error",
+		Retryable: true,
+		Cause:     originalErr,
+	}
+
+	t.Run("error_unwrapping", func(t *testing.T) {
+		unwrapped := errors.Unwrap(wrappedErr)
+		assert.Equal(t, originalErr, unwrapped, "Should unwrap to original error")
+	})
+
+	t.Run("error_is", func(t *testing.T) {
+		assert.True(t, errors.Is(wrappedErr, originalErr), "Should identify original error")
+	})
+
+	t.Run("error_as", func(t *testing.T) {
+		var assistantErr *AssistantError
+		assert.True(t, errors.As(wrappedErr, &assistantErr), "Should extract AssistantError")
+		assert.Equal(t, "test_error", assistantErr.Type, "Should preserve error type")
+	})
+}
+
+// TestErrorRecovery tests error recovery mechanisms
+func TestErrorRecovery(t *testing.T) {
+	logger := testutil.CreateTestLogger(slog.LevelDebug)
+	factory := testutil.NewTestDataFactory()
+
+	t.Run("retry_on_transient_error", func(t *testing.T) {
+		aiManager := testutil.NewMockAIManager(logger)
+
+		callCount := 0
+		aiManager.SetCustomResponseFunc(func(ctx context.Context, request *ai.GenerateRequest, providerName ...string) (*ai.GenerateResponse, error) {
+			callCount++
+			if callCount < 3 {
+				return nil, errors.New("transient error")
+			}
+			return factory.CreateAIGenerateResponse(
+				testutil.WithContent("success after retry"),
+			), nil
+		})
+
+		assistant := &Assistant{
+			aiManager: aiManager,
+			logger:    logger,
+		}
+
+		request := factory.CreateAssistantRequest(
+			testutil.WithMessage("retry test"),
+		)
+
+		// Implement retry logic
+		ctx := context.Background()
+		var response *Response
+		var err error
+
+		for attempt := 0; attempt < 3; attempt++ {
+			response, err = assistant.ProcessRequest(ctx, request)
+			if err == nil {
+				break
+			}
+
+			// Check if error is retryable
+			if assistantErr, ok := err.(*AssistantError); ok && !assistantErr.Retryable {
+				break
+			}
+
+			time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond) // Exponential backoff
+		}
+
+		assert.NoError(t, err, "Should succeed after retries")
+		assert.NotNil(t, response, "Should have response")
+		assert.Equal(t, 3, callCount, "Should have made 3 attempts")
+	})
+
+	t.Run("circuit_breaker_pattern", func(t *testing.T) {
+		aiManager := testutil.NewMockAIManager(logger)
+		aiManager.EnableErrorSimulation(1.0) // Always fail
+
+		assistant := &Assistant{
+			aiManager: aiManager,
+			logger:    logger,
+		}
+
+		request := factory.CreateAssistantRequest(
+			testutil.WithMessage("circuit breaker test"),
+		)
+
+		ctx := context.Background()
+
+		// Simulate circuit breaker
+		failureCount := 0
+		circuitOpen := false
+
+		for i := 0; i < 10; i++ {
+			if circuitOpen {
+				// Circuit is open, fail fast
+				err := errors.New("circuit breaker open")
+				assert.Error(t, err)
+				continue
+			}
+
+			_, err := assistant.ProcessRequest(ctx, request)
+			if err != nil {
+				failureCount++
+				if failureCount >= 3 {
+					circuitOpen = true
+				}
+			} else {
+				failureCount = 0 // Reset on success
+			}
+		}
+
+		assert.True(t, circuitOpen, "Circuit breaker should be open after failures")
+		assert.GreaterOrEqual(t, failureCount, 3, "Should have recorded failures")
+	})
+}
+
+// TestErrorLogging tests proper error logging
+func TestErrorLogging(t *testing.T) {
+	// Create a logger that captures log entries
+	var logEntries []string
+	handler := &testLogHandler{entries: &logEntries}
+	logger := slog.New(handler)
+
+	factory := testutil.NewTestDataFactory()
+	aiManager := testutil.NewMockAIManager(logger)
+	aiManager.EnableErrorSimulation(1.0)
+
+	assistant := &Assistant{
+		aiManager: aiManager,
+		logger:    logger,
+	}
+
+	request := factory.CreateAssistantRequest(
+		testutil.WithMessage("logging test"),
+	)
+
+	ctx := context.Background()
+	_, err := assistant.ProcessRequest(ctx, request)
+
+	assert.Error(t, err, "Should have error")
+	assert.NotEmpty(t, logEntries, "Should have logged entries")
+
+	// Verify error was logged with appropriate level and context
+	found := false
+	for _, entry := range logEntries {
+		if contains(entry, "error") && contains(entry, "simulated AI provider error") {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Should have logged the error")
+}
+
+// testLogHandler captures log entries for testing
+type testLogHandler struct {
+	entries *[]string
+}
+
+func (h *testLogHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return true
+}
+
+func (h *testLogHandler) Handle(ctx context.Context, record slog.Record) error {
+	*h.entries = append(*h.entries, record.Message)
+	return nil
+}
+
+func (h *testLogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return h
+}
+
+func (h *testLogHandler) WithGroup(name string) slog.Handler {
+	return h
+}
+
+// Helper function to check if string contains substring
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		(len(s) > len(substr) && (s[:len(substr)] == substr ||
+			s[len(s)-len(substr):] == substr ||
+			containsInMiddle(s, substr))))
+}
+
+func containsInMiddle(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+// TestPanicRecovery tests panic recovery mechanisms
+func TestPanicRecovery(t *testing.T) {
+	logger := testutil.CreateTestLogger(slog.LevelDebug)
+	factory := testutil.NewTestDataFactory()
+
+	t.Run("recover_from_panic", func(t *testing.T) {
+		aiManager := testutil.NewMockAIManager(logger)
+		aiManager.SetCustomResponseFunc(func(ctx context.Context, request *ai.GenerateRequest, providerName ...string) (*ai.GenerateResponse, error) {
+			panic("simulated panic")
+		})
+
+		assistant := &Assistant{
+			aiManager: aiManager,
+			logger:    logger,
+		}
+
+		request := factory.CreateAssistantRequest(
+			testutil.WithMessage("panic test"),
+		)
+
+		// Wrap in panic recovery
+		var response *Response
+		var err error
+
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					err = errors.New("panic recovered")
+				}
+			}()
+
+			response, err = assistant.ProcessRequest(context.Background(), request)
+		}()
+
+		assert.Error(t, err, "Should have error from panic recovery")
+		assert.Nil(t, response, "Response should be nil")
+		assert.Contains(t, err.Error(), "panic recovered", "Should indicate panic was recovered")
+	})
+}
+
+// TestMemoryLeakPrevention tests that errors don't cause memory leaks
+func TestMemoryLeakPrevention(t *testing.T) {
+	logger := testutil.CreateTestLogger(slog.LevelError)
+	factory := testutil.NewTestDataFactory()
+
+	aiManager := testutil.NewMockAIManager(logger)
+	aiManager.EnableErrorSimulation(1.0)
+
+	assistant := &Assistant{
+		aiManager: aiManager,
+		logger:    logger,
+	}
+
+	// Simulate many failed requests
+	ctx := context.Background()
+	for i := 0; i < 1000; i++ {
+		request := factory.CreateAssistantRequest(
+			testutil.WithMessage("memory leak test"),
+		)
+
+		_, err := assistant.ProcessRequest(ctx, request)
+		assert.Error(t, err, "Should have error")
+
+		// Ensure resources are cleaned up
+		// In a real implementation, this would check for goroutine leaks,
+		// unclosed connections, etc.
+	}
+
+	// This test mainly ensures the error handling doesn't accumulate resources
+	// In practice, you'd use tools like go-leak to detect actual leaks
+}
+
+// Simplified Assistant struct for testing
+type Assistant struct {
+	aiManager ai.Manager
+	logger    *slog.Logger
+}
+
+func (a *Assistant) ProcessRequest(ctx context.Context, request *Request) (*Response, error) {
+	// Validate request
+	if request.ID == "" || request.UserID == "" || request.Message == "" {
+		return nil, &AssistantError{
+			Type:      "validation_error",
+			Message:   "invalid request: missing required fields",
+			Retryable: false,
+		}
+	}
+
+	// Generate AI response
+	aiRequest := &ai.GenerateRequest{
+		Prompt: request.Message,
+	}
+
+	aiResponse, err := a.aiManager.GenerateResponse(ctx, aiRequest)
+	if err != nil {
+		a.logger.Error("AI generation failed", slog.Any("error", err))
+
+		// Determine error type and retryability
+		errorType := "ai_provider_error"
+		retryable := true
+
+		if errors.Is(err, context.DeadlineExceeded) {
+			errorType = "timeout_error"
+			retryable = false
+		} else if contains(err.Error(), "rate limit") {
+			errorType = "rate_limit_error"
+			retryable = true
+		}
+
+		return nil, &AssistantError{
+			Type:      errorType,
+			Message:   err.Error(),
+			Retryable: retryable,
+			Cause:     err,
+		}
+	}
+
+	// Validate AI response
+	if aiResponse.Content == "" {
+		return nil, &AssistantError{
+			Type:      "response_error",
+			Message:   "empty response content",
+			Retryable: false,
+		}
+	}
+
+	// Create response
+	response := &Response{
+		ID:        factory.GenerateID(),
+		RequestID: request.ID,
+		Content:   aiResponse.Content,
+		Timestamp: time.Now(),
+	}
+
+	return response, nil
+}
+
+var factory = testutil.NewTestDataFactory()

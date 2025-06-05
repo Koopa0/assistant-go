@@ -14,34 +14,33 @@ import (
 )
 
 const CreateConversation = `-- name: CreateConversation :one
-INSERT INTO conversations (user_id, title, metadata)
-VALUES ($1, $2, $3)
-RETURNING id, user_id, title, metadata, created_at, updated_at
+INSERT INTO conversations (user_id, title, summary, metadata)
+VALUES ($1, $2, $3, $4)
+RETURNING id, user_id, title, summary, metadata, is_archived, created_at, updated_at
 `
 
 type CreateConversationParams struct {
 	UserID   pgtype.UUID     `json:"user_id"`
 	Title    string          `json:"title"`
+	Summary  pgtype.Text     `json:"summary"`
 	Metadata json.RawMessage `json:"metadata"`
 }
 
-type CreateConversationRow struct {
-	ID        pgtype.UUID     `json:"id"`
-	UserID    pgtype.UUID     `json:"user_id"`
-	Title     string          `json:"title"`
-	Metadata  json.RawMessage `json:"metadata"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
-}
-
-func (q *Queries) CreateConversation(ctx context.Context, arg CreateConversationParams) (*CreateConversationRow, error) {
-	row := q.db.QueryRow(ctx, CreateConversation, arg.UserID, arg.Title, arg.Metadata)
-	var i CreateConversationRow
+func (q *Queries) CreateConversation(ctx context.Context, arg CreateConversationParams) (*Conversation, error) {
+	row := q.db.QueryRow(ctx, CreateConversation,
+		arg.UserID,
+		arg.Title,
+		arg.Summary,
+		arg.Metadata,
+	)
+	var i Conversation
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
 		&i.Title,
+		&i.Summary,
 		&i.Metadata,
+		&i.IsArchived,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -59,28 +58,21 @@ func (q *Queries) DeleteConversation(ctx context.Context, id pgtype.UUID) error 
 }
 
 const GetConversation = `-- name: GetConversation :one
-SELECT id, user_id, title, metadata, created_at, updated_at
+SELECT id, user_id, title, summary, metadata, is_archived, created_at, updated_at
 FROM conversations
 WHERE id = $1
 `
 
-type GetConversationRow struct {
-	ID        pgtype.UUID     `json:"id"`
-	UserID    pgtype.UUID     `json:"user_id"`
-	Title     string          `json:"title"`
-	Metadata  json.RawMessage `json:"metadata"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
-}
-
-func (q *Queries) GetConversation(ctx context.Context, id pgtype.UUID) (*GetConversationRow, error) {
+func (q *Queries) GetConversation(ctx context.Context, id pgtype.UUID) (*Conversation, error) {
 	row := q.db.QueryRow(ctx, GetConversation, id)
-	var i GetConversationRow
+	var i Conversation
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
 		&i.Title,
+		&i.Summary,
 		&i.Metadata,
+		&i.IsArchived,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -101,42 +93,28 @@ func (q *Queries) GetConversationCount(ctx context.Context, userID pgtype.UUID) 
 }
 
 const GetConversationsByUser = `-- name: GetConversationsByUser :many
-SELECT id, user_id, title, metadata, created_at, updated_at
+SELECT id, user_id, title, summary, metadata, is_archived, created_at, updated_at
 FROM conversations
 WHERE user_id = $1
 ORDER BY updated_at DESC
-LIMIT $2 OFFSET $3
 `
 
-type GetConversationsByUserParams struct {
-	UserID pgtype.UUID `json:"user_id"`
-	Limit  int32       `json:"limit"`
-	Offset int32       `json:"offset"`
-}
-
-type GetConversationsByUserRow struct {
-	ID        pgtype.UUID     `json:"id"`
-	UserID    pgtype.UUID     `json:"user_id"`
-	Title     string          `json:"title"`
-	Metadata  json.RawMessage `json:"metadata"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
-}
-
-func (q *Queries) GetConversationsByUser(ctx context.Context, arg GetConversationsByUserParams) ([]*GetConversationsByUserRow, error) {
-	rows, err := q.db.Query(ctx, GetConversationsByUser, arg.UserID, arg.Limit, arg.Offset)
+func (q *Queries) GetConversationsByUser(ctx context.Context, userID pgtype.UUID) ([]*Conversation, error) {
+	rows, err := q.db.Query(ctx, GetConversationsByUser, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []*GetConversationsByUserRow{}
+	items := []*Conversation{}
 	for rows.Next() {
-		var i GetConversationsByUserRow
+		var i Conversation
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,
 			&i.Title,
+			&i.Summary,
 			&i.Metadata,
+			&i.IsArchived,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {

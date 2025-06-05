@@ -1,71 +1,84 @@
 # Documentation
 
-This directory contains comprehensive documentation for the Assistant intelligent development companion.
+This directory contains comprehensive documentation for the Assistant intelligent development companion project.
 
-## Documentation Structure
+## Documents Overview
 
-### Core Documentation
-- **`API_REFERENCE.md`** - Complete API documentation and examples
-- **`CODE_QUALITY.md`** - Code quality standards and best practices
-- **`OPERATIONS_GUIDE.md`** - Deployment and operational procedures
+### [Architecture.md](./Architecture.md)
+Complete system architecture documentation covering:
+- **Conceptual Overview**: High-level system design and philosophy
+- **Intelligence Systems**: Multi-agent architecture and memory systems
+- **Data Flow**: Request processing and context management
+- **Integration Patterns**: External service and tool integration
+- **Technology Stack**: Core technologies and frameworks used
 
-### Implementation Guides
-- **`CONTEXT_INTEGRATION_COMPLETE.md`** - Context system integration details
-- **`CURRENT_STATUS.md`** - Current project status and progress
+### [API_REFERENCE.md](./API_REFERENCE.md)
+Complete API documentation including:
+- **REST API Endpoints**: HTTP API specifications
+- **Request/Response Formats**: Data structures and schemas
+- **Authentication**: API key management and security
+- **Rate Limiting**: Usage limits and throttling
+- **Error Handling**: Error codes and troubleshooting
 
-### API Documentation
-- **`api/`** - Detailed API endpoint documentation
+### [OPERATIONS_GUIDE.md](./OPERATIONS_GUIDE.md)
+Production operations and maintenance guide:
+- **Deployment**: Production deployment strategies
+- **Monitoring**: Health checks and observability
+- **Troubleshooting**: Common issues and solutions
+- **Performance**: Optimization and scaling guidelines
+- **Maintenance**: Backup, recovery, and updates
 
-### Visual Documentation
-- **`diagrams/`** - System architecture and flow diagrams
+### [TESTING_GUIDE.md](./TESTING_GUIDE.md)
+Comprehensive testing documentation:
+- **Testing Strategy**: Testing philosophy and approaches
+- **Test Categories**: Unit, integration, and E2E testing
+- **Test Environment**: Setup and configuration
+- **Best Practices**: Testing patterns and guidelines
+- **CI/CD Integration**: Automated testing workflows
 
-## Key Documents
+### [CODE_QUALITY.md](./CODE_QUALITY.md)
+Code quality standards and tooling:
+- **Quality Standards**: Coding conventions and best practices
+- **Linting Configuration**: golangci-lint and other tools
+- **Code Review**: Review process and guidelines
+- **Performance**: Benchmarking and optimization
+- **Security**: Security scanning and best practices
+
+## Additional Resources
+
+### API Documentation (`api/`)
+OpenAPI specifications and additional API documentation files.
+
+## Navigation Guide
 
 ### For Developers
-1. **Start Here**: `/Architecture.md` - High-level system design
-2. **Code Standards**: `CODE_QUALITY.md` - Quality requirements
-3. **API Integration**: `API_REFERENCE.md` - How to use the API
+1. Start with [Architecture.md](./Architecture.md) to understand the system design
+2. Review [CODE_QUALITY.md](./CODE_QUALITY.md) for development standards
+3. Follow [TESTING_GUIDE.md](./TESTING_GUIDE.md) for testing practices
 
-### For Operations
-1. **Deployment**: `OPERATIONS_GUIDE.md` - How to deploy and maintain
-2. **Monitoring**: Integration with observability systems
+### For Operators
+1. Read [OPERATIONS_GUIDE.md](./OPERATIONS_GUIDE.md) for deployment and maintenance
+2. Use [API_REFERENCE.md](./API_REFERENCE.md) for API integration
+3. Reference [Architecture.md](./Architecture.md) for system understanding
 
-### For Users
-1. **Getting Started**: `/README.md` - Installation and basic usage
-2. **Examples**: API documentation includes usage examples
-
-## Documentation Standards
-
-### Writing Guidelines
-- Use clear, concise language
-- Provide code examples for all concepts
-- Include error handling in examples
-- Keep examples up-to-date with codebase
-
-### Format Standards
-- Use Markdown for all documentation
-- Follow consistent heading structure
-- Include table of contents for long documents
-- Use code blocks with appropriate language tags
-
-### Maintenance
-- Update documentation with code changes
-- Review documentation quarterly
-- Test all code examples
-- Validate external links regularly
+### For API Users
+1. Start with [API_REFERENCE.md](./API_REFERENCE.md) for API specifications
+2. Check [OPERATIONS_GUIDE.md](./OPERATIONS_GUIDE.md) for deployment options
+3. Review [Architecture.md](./Architecture.md) for system capabilities
 
 ## Contributing to Documentation
 
-### Adding New Documentation
-1. Choose appropriate location in docs structure
-2. Follow existing format and style
-3. Include practical examples
-4. Link from relevant existing documents
+When updating documentation:
+1. **Keep it current**: Update docs with code changes
+2. **Be comprehensive**: Cover both happy path and edge cases
+3. **Include examples**: Provide practical usage examples
+4. **Link appropriately**: Cross-reference related sections
+5. **Test examples**: Ensure all code examples work
 
-### Updating Existing Documentation
-1. Verify accuracy of current content
-2. Update examples and code snippets
-3. Check internal and external links
-4. Update modification dates
+## Documentation Standards
 
-This documentation aims to make the Assistant system accessible to developers, operators, and users at all levels of expertise.
+- Use clear, concise language
+- Include practical examples
+- Maintain consistent formatting
+- Keep technical accuracy
+- Update with code changes

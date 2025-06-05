@@ -47,8 +47,13 @@ func (a *LangChainToolAdapter) Call(ctx context.Context, input string) (string, 
 		return "", fmt.Errorf("failed to parse input: %w", err)
 	}
 
+	// Convert map to ToolInput
+	toolInput := &internaltools.ToolInput{
+		Parameters: inputMap,
+	}
+
 	// Execute internal tool
-	result, err := a.internalTool.Execute(ctx, inputMap)
+	result, err := a.internalTool.Execute(ctx, toolInput)
 	if err != nil {
 		return "", fmt.Errorf("tool execution failed: %w", err)
 	}
@@ -91,9 +96,9 @@ func (a *LangChainToolAdapter) formatResult(result *internaltools.ToolResult) (s
 		return fmt.Sprintf("Error: %s", result.Error), nil
 	}
 
-	// If data is already a string, return it directly
-	if str, ok := result.Data.(string); ok {
-		return str, nil
+	// If data contains output, return it
+	if result.Data != nil && result.Data.Output != "" {
+		return result.Data.Output, nil
 	}
 
 	// Try to convert data to JSON string
@@ -131,8 +136,11 @@ func (tr *ToolRegistry) GetLangChainTool(name string, config map[string]interfac
 		return adapter, nil
 	}
 
+	// Convert legacy config to ToolConfig
+	toolConfig := internaltools.ConvertLegacyConfig(config)
+
 	// Get internal tool
-	internalTool, err := tr.internalRegistry.GetTool(name, config)
+	internalTool, err := tr.internalRegistry.GetTool(name, toolConfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get internal tool: %w", err)
 	}

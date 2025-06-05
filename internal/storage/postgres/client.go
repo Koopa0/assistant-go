@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant-go/internal/storage/postgres/sqlc"
 )
 
 // Client represents a PostgreSQL client
@@ -17,7 +18,19 @@ type Client struct {
 	pool   *pgxpool.Pool
 	config config.DatabaseConfig
 	logger *slog.Logger
+	sqlc   *SQLCClient
 }
+
+// Ensure Client implements the new interfaces
+var (
+	_ DB              = (*Client)(nil)
+	_ Querier         = (*Client)(nil)
+	_ Executor        = (*Client)(nil)
+	_ Transactor      = (*Client)(nil)
+	_ HealthChecker   = (*Client)(nil)
+	_ StatsProvider   = (*Client)(nil)
+	_ QueriesProvider = (*Client)(nil)
+)
 
 // NewClient creates a new PostgreSQL client
 func NewClient(ctx context.Context, cfg config.DatabaseConfig) (*Client, error) {
@@ -66,10 +79,13 @@ func NewClient(ctx context.Context, cfg config.DatabaseConfig) (*Client, error) 
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
+	logger := slog.Default()
+
 	client := &Client{
 		pool:   pool,
 		config: cfg,
-		logger: slog.Default(),
+		logger: logger,
+		sqlc:   NewSQLCClient(pool, logger),
 	}
 
 	return client, nil
@@ -79,6 +95,14 @@ func NewClient(ctx context.Context, cfg config.DatabaseConfig) (*Client, error) 
 func (c *Client) Close() error {
 	if c.pool != nil {
 		c.pool.Close()
+	}
+	return nil
+}
+
+// GetQueries returns the underlying sqlc.Queries for direct access
+func (c *Client) GetQueries() *sqlc.Queries {
+	if c.sqlc != nil {
+		return c.sqlc.GetQueries()
 	}
 	return nil
 }
@@ -114,17 +138,17 @@ func (c *Client) BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, 
 }
 
 // Query executes a query that returns rows
-func (c *Client) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+func (c *Client) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	return c.pool.Query(ctx, sql, args...)
 }
 
 // QueryRow executes a query that returns at most one row
-func (c *Client) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+func (c *Client) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	return c.pool.QueryRow(ctx, sql, args...)
 }
 
 // Exec executes a query that doesn't return rows
-func (c *Client) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
+func (c *Client) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	return c.pool.Exec(ctx, sql, args...)
 }
 
@@ -239,6 +263,26 @@ func (c *Client) Health(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// DatabaseInfo returns information about the database
+func (c *Client) DatabaseInfo(ctx context.Context) (*DatabaseInfo, error) {
+	var version string
+	row := c.pool.QueryRow(ctx, "SELECT version()")
+	if err := row.Scan(&version); err != nil {
+		return nil, fmt.Errorf("failed to get database version: %w", err)
+	}
+
+	stats := c.pool.Stat()
+
+	info := &DatabaseInfo{
+		Version: version,
+	}
+	info.Connections.Active = stats.AcquiredConns()
+	info.Connections.Idle = stats.IdleConns()
+	info.Connections.Max = stats.MaxConns()
+
+	return info, nil
 }
 
 // NewOptimizedClient creates a PostgreSQL client optimized for PostgreSQL 17

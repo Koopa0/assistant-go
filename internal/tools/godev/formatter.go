@@ -22,10 +22,18 @@ type GoFormatter struct {
 }
 
 // NewGoFormatter creates a new Go formatter tool
-func NewGoFormatter(config map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+func NewGoFormatter(config *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
+	// Convert ToolConfig to legacy map format for now
+	legacyConfig := make(map[string]interface{})
+	if config != nil {
+		legacyConfig["timeout"] = config.Timeout
+		legacyConfig["debug"] = config.Debug
+		legacyConfig["working_dir"] = config.WorkingDir
+	}
+
 	return &GoFormatter{
 		logger: logger,
-		config: config,
+		config: legacyConfig,
 	}, nil
 }
 
@@ -40,46 +48,46 @@ func (g *GoFormatter) Description() string {
 }
 
 // Parameters returns the tool parameters schema
-func (g *GoFormatter) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"path": map[string]interface{}{
-				"type":        "string",
-				"description": "Path to Go file or directory to format",
-				"required":    true,
+func (g *GoFormatter) Parameters() *tools.ToolParametersSchema {
+	return &tools.ToolParametersSchema{
+		Type: "object",
+		Properties: map[string]tools.ToolParameter{
+			"path": {
+				Type:        "string",
+				Description: "Path to Go file or directory to format",
+				Required:    true,
 			},
-			"write": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Write formatted content back to files",
-				"default":     false,
+			"write": {
+				Type:        "boolean",
+				Description: "Write formatted content back to files",
+				Default:     false,
 			},
-			"recursive": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Recursively format files in subdirectories",
-				"default":     true,
+			"recursive": {
+				Type:        "boolean",
+				Description: "Recursively format files in subdirectories",
+				Default:     true,
 			},
-			"simplify": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Apply gofmt simplification rules",
-				"default":     true,
+			"simplify": {
+				Type:        "boolean",
+				Description: "Apply gofmt simplification rules",
+				Default:     true,
 			},
-			"check_only": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Only check if files need formatting",
-				"default":     false,
+			"check_only": {
+				Type:        "boolean",
+				Description: "Only check if files need formatting",
+				Default:     false,
 			},
 		},
-		"required": []string{"path"},
+		Required: []string{"path"},
 	}
 }
 
 // Execute executes the Go formatter
-func (g *GoFormatter) Execute(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+func (g *GoFormatter) Execute(ctx context.Context, input *tools.ToolInput) (*tools.ToolResult, error) {
 	startTime := time.Now()
 
 	// Parse input parameters
-	path, ok := input["path"].(string)
+	path, ok := input.Parameters["path"].(string)
 	if !ok || path == "" {
 		return &tools.ToolResult{
 			Success: false,
@@ -88,22 +96,22 @@ func (g *GoFormatter) Execute(ctx context.Context, input map[string]interface{})
 	}
 
 	write := false
-	if w, ok := input["write"].(bool); ok {
+	if w, ok := input.Parameters["write"].(bool); ok {
 		write = w
 	}
 
 	recursive := true
-	if r, ok := input["recursive"].(bool); ok {
+	if r, ok := input.Parameters["recursive"].(bool); ok {
 		recursive = r
 	}
 
 	simplify := true
-	if s, ok := input["simplify"].(bool); ok {
+	if s, ok := input.Parameters["simplify"].(bool); ok {
 		simplify = s
 	}
 
 	checkOnly := false
-	if c, ok := input["check_only"].(bool); ok {
+	if c, ok := input.Parameters["check_only"].(bool); ok {
 		checkOnly = c
 	}
 
@@ -124,17 +132,27 @@ func (g *GoFormatter) Execute(ctx context.Context, input map[string]interface{})
 		}, err
 	}
 
-	return &tools.ToolResult{
-		Success: true,
-		Data:    result,
-		Metadata: map[string]interface{}{
-			"path":           path,
-			"write":          write,
-			"recursive":      recursive,
-			"simplify":       simplify,
-			"check_only":     checkOnly,
-			"execution_time": time.Since(startTime).String(),
+	// Convert FormatterResult to ToolResultData
+	toolData := convertFormatterResultToToolData(result)
+
+	// Create metadata
+	metadata := &tools.ToolMetadata{
+		StartTime:     startTime,
+		EndTime:       time.Now(),
+		ExecutionTime: time.Since(startTime),
+		Parameters: map[string]string{
+			"path":       path,
+			"write":      fmt.Sprintf("%t", write),
+			"recursive":  fmt.Sprintf("%t", recursive),
+			"simplify":   fmt.Sprintf("%t", simplify),
+			"check_only": fmt.Sprintf("%t", checkOnly),
 		},
+	}
+
+	return &tools.ToolResult{
+		Success:       true,
+		Data:          toolData,
+		Metadata:      metadata,
 		ExecutionTime: time.Since(startTime),
 	}, nil
 }
@@ -379,4 +397,35 @@ func (g *GoFormatter) calculateTotalChanges(result *FormatterResult) int {
 		total += file.Changes
 	}
 	return total
+}
+
+// convertFormatterResultToToolData converts FormatterResult to ToolResultData
+func convertFormatterResultToToolData(formatResult *FormatterResult) *tools.ToolResultData {
+	if formatResult == nil {
+		return &tools.ToolResultData{}
+	}
+
+	// Create results for each formatted file
+	results := make([]tools.ResultItem, 0, len(formatResult.FormattedFiles))
+	for _, file := range formatResult.FormattedFiles {
+		results = append(results, tools.ResultItem{
+			ID:          fmt.Sprintf("formatted_%s", filepath.Base(file.Path)),
+			Type:        "formatted_file",
+			Name:        file.Path,
+			Description: fmt.Sprintf("Formatted with %d changes", file.Changes),
+			Value:       fmt.Sprintf("%d", file.Changes),
+			Metadata: map[string]string{
+				"before_size":  fmt.Sprintf("%d", file.BeforeSize),
+				"after_size":   fmt.Sprintf("%d", file.AfterSize),
+				"before_lines": fmt.Sprintf("%d", file.BeforeLines),
+				"after_lines":  fmt.Sprintf("%d", file.AfterLines),
+				"changes":      fmt.Sprintf("%d", file.Changes),
+			},
+		})
+	}
+
+	return &tools.ToolResultData{
+		LinesProcessed: int64(formatResult.Summary.TotalFiles),
+		Results:        results,
+	}
 }

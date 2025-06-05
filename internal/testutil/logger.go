@@ -3,6 +3,7 @@ package testutil
 import (
 	"log/slog"
 	"os"
+	"runtime"
 )
 
 // NewTestLogger creates a logger suitable for testing
@@ -21,4 +22,17 @@ func NewSilentLogger() *slog.Logger {
 		Level: slog.LevelError + 1, // Higher than any log level
 	})
 	return slog.New(handler)
+}
+
+// GetMemStats returns current memory statistics for testing
+func GetMemStats() runtime.MemStats {
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	return stats
+}
+
+// ForceGC forces garbage collection for testing
+func ForceGC() {
+	runtime.GC()
+	runtime.GC() // Run twice to ensure thorough cleanup
 }

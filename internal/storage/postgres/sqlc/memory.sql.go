@@ -164,26 +164,12 @@ func (q *Queries) GetMemoryEntriesBySession(ctx context.Context, arg GetMemoryEn
 const GetMemoryEntriesByUser = `-- name: GetMemoryEntriesByUser :many
 SELECT id, memory_type, user_id, session_id, content, importance, access_count, last_access, created_at, expires_at, metadata FROM memory_entries
 WHERE user_id = $1::uuid
-  AND (memory_type = ANY($2::text[]) OR $2 IS NULL)
   AND (expires_at IS NULL OR expires_at > NOW())
 ORDER BY importance DESC, last_access DESC
-LIMIT $3 OFFSET $4
 `
 
-type GetMemoryEntriesByUserParams struct {
-	Column1 pgtype.UUID `json:"column_1"`
-	Column2 []string    `json:"column_2"`
-	Limit   int32       `json:"limit"`
-	Offset  int32       `json:"offset"`
-}
-
-func (q *Queries) GetMemoryEntriesByUser(ctx context.Context, arg GetMemoryEntriesByUserParams) ([]*MemoryEntry, error) {
-	rows, err := q.db.Query(ctx, GetMemoryEntriesByUser,
-		arg.Column1,
-		arg.Column2,
-		arg.Limit,
-		arg.Offset,
-	)
+func (q *Queries) GetMemoryEntriesByUser(ctx context.Context, dollar_1 pgtype.UUID) ([]*MemoryEntry, error) {
+	rows, err := q.db.Query(ctx, GetMemoryEntriesByUser, dollar_1)
 	if err != nil {
 		return nil, err
 	}
@@ -272,31 +258,22 @@ func (q *Queries) GetMemoryStats(ctx context.Context, dollar_1 pgtype.UUID) (*Ge
 	return &i, err
 }
 
-const IncrementMemoryAccess = `-- name: IncrementMemoryAccess :one
+const IncrementMemoryAccess = `-- name: IncrementMemoryAccess :exec
 UPDATE memory_entries
-SET access_count = access_count + 1,
-    last_access = NOW()
+SET access_count = $2,
+    last_access = $3
 WHERE id = $1
-RETURNING id, memory_type, user_id, session_id, content, importance, access_count, last_access, created_at, expires_at, metadata
 `
 
-func (q *Queries) IncrementMemoryAccess(ctx context.Context, id pgtype.UUID) (*MemoryEntry, error) {
-	row := q.db.QueryRow(ctx, IncrementMemoryAccess, id)
-	var i MemoryEntry
-	err := row.Scan(
-		&i.ID,
-		&i.MemoryType,
-		&i.UserID,
-		&i.SessionID,
-		&i.Content,
-		&i.Importance,
-		&i.AccessCount,
-		&i.LastAccess,
-		&i.CreatedAt,
-		&i.ExpiresAt,
-		&i.Metadata,
-	)
-	return &i, err
+type IncrementMemoryAccessParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	AccessCount pgtype.Int4        `json:"access_count"`
+	LastAccess  pgtype.Timestamptz `json:"last_access"`
+}
+
+func (q *Queries) IncrementMemoryAccess(ctx context.Context, arg IncrementMemoryAccessParams) error {
+	_, err := q.db.Exec(ctx, IncrementMemoryAccess, arg.ID, arg.AccessCount, arg.LastAccess)
+	return err
 }
 
 const SearchMemoryEntries = `-- name: SearchMemoryEntries :many

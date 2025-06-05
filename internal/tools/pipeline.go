@@ -179,7 +179,8 @@ func (p *Pipeline) ExecuteWithPipeline(execCtx *ExecutionContext, toolName strin
 	for attempt := 1; attempt <= retryPolicy.MaxAttempts; attempt++ {
 		attemptStart := time.Now()
 
-		toolResult, execErr := p.registry.Execute(ctx, toolName, input, nil)
+		toolInput := ConvertLegacyInput(input)
+		toolResult, execErr := p.registry.Execute(ctx, toolName, toolInput, nil)
 		attemptEnd := time.Now()
 
 		result = &ExecutionResult{

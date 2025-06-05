@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -44,6 +45,69 @@ func float32ToFloat64(f32 []float32) []float64 {
 		f64[i] = float64(v)
 	}
 	return f64
+}
+
+// SearchSimilarEmbeddingsOptimized uses pgx v5 generic row collection following golang_guide.md best practices
+func (s *SQLCImprovements) SearchSimilarEmbeddingsOptimized(ctx context.Context, queryEmbedding []float64, contentType string, limit int) ([]EmbeddingRecord, error) {
+	// Convert to pgvector.Vector following golang_guide.md type safety practices
+	vector := pgvector.NewVector(float64ToFloat32(queryEmbedding))
+
+	query := `
+		SELECT id, content_type, content_id, content_text, embedding, metadata, created_at,
+		       1 - (embedding <=> $1::vector) as similarity
+		FROM embeddings 
+		WHERE content_type = $2
+		  AND 1 - (embedding <=> $1::vector) > 0.3
+		ORDER BY embedding <=> $1::vector
+		LIMIT $3`
+
+	rows, err := s.pool.Query(ctx, query, vector, contentType, limit)
+	if err != nil {
+		return nil, fmt.Errorf("similarity search failed: %w", err)
+	}
+	defer rows.Close()
+
+	// pgx v5 泛型行收集（遵循 golang_guide.md 的類型安全實踐）
+	type EmbeddingSearchResult struct {
+		ID          string          `db:"id"`
+		ContentType string          `db:"content_type"`
+		ContentID   string          `db:"content_id"`
+		ContentText string          `db:"content_text"`
+		Embedding   pgvector.Vector `db:"embedding"`
+		Metadata    []byte          `db:"metadata"`
+		CreatedAt   time.Time       `db:"created_at"`
+		Similarity  float64         `db:"similarity"`
+	}
+
+	searchResults, err := pgx.CollectRows(rows, pgx.RowToStructByName[EmbeddingSearchResult])
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect search results: %w", err)
+	}
+
+	// Convert to domain objects (following "Accept interfaces, return structs" principle)
+	result := make([]EmbeddingRecord, len(searchResults))
+	for i, row := range searchResults {
+		var metadata map[string]interface{}
+		if len(row.Metadata) > 0 {
+			if err := json.Unmarshal(row.Metadata, &metadata); err != nil {
+				s.logger.Warn("Failed to unmarshal metadata",
+					slog.String("content_id", row.ContentID),
+					slog.Any("error", err))
+			}
+		}
+
+		result[i] = EmbeddingRecord{
+			ID:          row.ID,
+			ContentType: row.ContentType,
+			ContentID:   row.ContentID,
+			ContentText: row.ContentText,
+			Embedding:   float32ToFloat64(row.Embedding.Slice()),
+			Metadata:    metadata,
+			CreatedAt:   row.CreatedAt,
+		}
+	}
+
+	return result, nil
 }
 
 // CreateEmbeddingWithVector creates an embedding using proper pgvector types

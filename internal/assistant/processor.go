@@ -25,7 +25,7 @@ import (
 // - Handles errors gracefully with appropriate error types
 type Processor struct {
 	config    *config.Config
-	db        postgres.ClientInterface
+	db        postgres.DB
 	registry  *tools.Registry
 	logger    *slog.Logger
 	context   *ContextManager
@@ -33,7 +33,7 @@ type Processor struct {
 }
 
 // NewProcessor creates a new processor
-func NewProcessor(cfg *config.Config, db postgres.ClientInterface, registry *tools.Registry, logger *slog.Logger) (*Processor, error) {
+func NewProcessor(cfg *config.Config, db postgres.DB, registry *tools.Registry, logger *slog.Logger) (*Processor, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -128,8 +128,8 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 		slog.String("conversation_id", conversation.ID),
 		slog.String("user_id", conversation.UserID),
 		slog.Int("message_count", len(conversation.Messages)),
-		slog.Any("workspace_context", enrichedContext["workspace"]),
-		slog.Any("memory_context", enrichedContext["memory"]))
+		slog.Any("workspace_context", enrichedContext.Workspace),
+		slog.Any("memory_context", enrichedContext.Memory))
 
 	// Step 4: Add user message to conversation with enriched context
 	messageContext := request.Context
@@ -137,8 +137,17 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 		messageContext = make(map[string]interface{})
 	}
 	// Merge enriched context into message metadata
-	for key, value := range enrichedContext {
-		messageContext[key] = value
+	if enrichedContext.Workspace != nil {
+		messageContext["workspace"] = enrichedContext.Workspace
+	}
+	if enrichedContext.Memory != nil {
+		messageContext["memory"] = enrichedContext.Memory
+	}
+	if enrichedContext.Query != nil {
+		messageContext["query"] = enrichedContext.Query
+	}
+	if enrichedContext.User != nil {
+		messageContext["user"] = enrichedContext.User
 	}
 
 	userMessage, err := p.context.AddMessage(ctx, conversation.ID, "user", request.Query, messageContext)
@@ -329,7 +338,7 @@ func (p *Processor) generateConversationTitle(query string) string {
 }
 
 // processWithAI processes the request with the AI provider using enriched context
-func (p *Processor) processWithAI(ctx context.Context, conversation *Conversation, request *QueryRequest, provider, model string, enrichedContext map[string]interface{}) (string, int, error) {
+func (p *Processor) processWithAI(ctx context.Context, conversation *Conversation, request *QueryRequest, provider, model string, enrichedContext *ProcessorContext) (string, int, error) {
 	p.logger.Debug("Processing with AI provider",
 		slog.String("provider", provider),
 		slog.String("model", model),
@@ -364,9 +373,18 @@ func (p *Processor) processWithAI(ctx context.Context, conversation *Conversatio
 	if requestMetadata == nil {
 		requestMetadata = make(map[string]interface{})
 	}
-	// Merge enriched context
-	for key, value := range enrichedContext {
-		requestMetadata[key] = value
+	// Merge enriched context - convert ProcessorContext to map for compatibility
+	if enrichedContext.Workspace != nil {
+		requestMetadata["workspace"] = enrichedContext.Workspace
+	}
+	if enrichedContext.Memory != nil {
+		requestMetadata["memory"] = enrichedContext.Memory
+	}
+	if enrichedContext.Query != nil {
+		requestMetadata["query"] = enrichedContext.Query
+	}
+	if enrichedContext.User != nil {
+		requestMetadata["user"] = enrichedContext.User
 	}
 
 	aiRequest := &ai.GenerateRequest{
@@ -563,13 +581,16 @@ func (p *Processor) executeTools(ctx context.Context, toolNames []string, toolPa
 			continue
 		}
 
-		// Prepare tool input
-		toolInput := make(map[string]interface{})
+		// Prepare tool input with typed structure
+		toolInput := &tools.ToolInput{
+			Parameters: make(map[string]interface{}),
+		}
+
 		if toolParams != nil {
 			// Extract parameters specific to this tool
 			if params, exists := toolParams[toolName]; exists {
 				if paramMap, ok := params.(map[string]interface{}); ok {
-					toolInput = paramMap
+					toolInput.Parameters = paramMap
 				}
 			}
 		}
@@ -695,7 +716,7 @@ You have access to various tools and can help with:
 - Development workflow automation
 
 CRITICAL LANGUAGE REQUIREMENTS:
-- You MUST NEVER use Simplified Chinese (简体中文) in any responses
+- You MUST NEVER use Simplified Chinese (簡體中文) in any responses
 - You MUST ONLY respond in Traditional Chinese (繁體中文) or English
 - When the user writes in Traditional Chinese, respond in Traditional Chinese
 - When the user writes in English, respond in English
@@ -707,53 +728,55 @@ Maintain a professional but friendly tone, and focus on practical solutions that
 }
 
 // getContextAwareSystemPrompt returns a context-aware system prompt
-func (p *Processor) getContextAwareSystemPrompt(provider string, enrichedContext map[string]interface{}) string {
+func (p *Processor) getContextAwareSystemPrompt(provider string, enrichedContext *ProcessorContext) string {
 	var builder strings.Builder
 	builder.WriteString(p.getSystemPrompt(provider))
 
 	// Add workspace context if available
-	if workspace, ok := enrichedContext["workspace"]; ok {
-		if workspaceMap, ok := workspace.(map[string]interface{}); ok {
-			builder.WriteString("\n\n## Current Workspace Context:\n")
+	if enrichedContext.Workspace != nil {
+		workspace := enrichedContext.Workspace
+		builder.WriteString("\n\n## Current Workspace Context:\n")
 
-			if projectType, ok := workspaceMap["project_type"]; ok {
-				builder.WriteString(fmt.Sprintf("- Project Type: %v\n", projectType))
+		builder.WriteString(fmt.Sprintf("- Project Type: %s\n", workspace.ProjectType))
+		if len(workspace.Languages) > 0 {
+			builder.WriteString(fmt.Sprintf("- Languages: %v\n", workspace.Languages))
+		}
+		if workspace.Framework != "" {
+			builder.WriteString(fmt.Sprintf("- Framework: %s\n", workspace.Framework))
+		}
+		if len(workspace.Dependencies) > 0 {
+			builder.WriteString(fmt.Sprintf("- Dependencies: %v\n", workspace.Dependencies))
+		}
+		if workspace.Metadata != nil {
+			if projectPath, ok := workspace.Metadata["project_path"]; ok {
+				builder.WriteString(fmt.Sprintf("- Project Path: %s\n", projectPath))
 			}
-			if language, ok := workspaceMap["primary_language"]; ok {
-				builder.WriteString(fmt.Sprintf("- Primary Language: %v\n", language))
-			}
-			if projectPath, ok := workspaceMap["project_path"]; ok {
-				builder.WriteString(fmt.Sprintf("- Project Path: %v\n", projectPath))
-			}
-			if gitRepo, ok := workspaceMap["git_repository"]; ok {
-				builder.WriteString(fmt.Sprintf("- Git Repository: %v\n", gitRepo))
-			}
-			if frameworks, ok := workspaceMap["frameworks"]; ok {
-				builder.WriteString(fmt.Sprintf("- Frameworks: %v\n", frameworks))
+			if gitRepo, ok := workspace.Metadata["git_repository"]; ok {
+				builder.WriteString(fmt.Sprintf("- Git Repository: %s\n", gitRepo))
 			}
 		}
 	}
 
 	// Add memory context if available
-	if memory, ok := enrichedContext["memory"]; ok {
-		if memoryMap, ok := memory.(map[string]interface{}); ok {
-			builder.WriteString("\n## Relevant Memory Context:\n")
+	if enrichedContext.Memory != nil {
+		memory := enrichedContext.Memory
+		builder.WriteString("\n## Relevant Memory Context:\n")
 
-			if workingMemory, ok := memoryMap["working"]; ok {
-				builder.WriteString(fmt.Sprintf("- Current Focus: %v\n", workingMemory))
-			}
-			if recentKnowledge, ok := memoryMap["recent_knowledge"]; ok {
-				builder.WriteString(fmt.Sprintf("- Recent Knowledge: %v\n", recentKnowledge))
-			}
-			if userPreferences, ok := memoryMap["user_preferences"]; ok {
-				builder.WriteString(fmt.Sprintf("- User Preferences: %v\n", userPreferences))
-			}
+		if memory.WorkingMemory != "" {
+			builder.WriteString(fmt.Sprintf("- Current Focus: %s\n", memory.WorkingMemory))
+		}
+		if len(memory.RecentTopics) > 0 {
+			builder.WriteString(fmt.Sprintf("- Recent Topics: %v\n", memory.RecentTopics))
+		}
+		if memory.UserPreferences != nil {
+			builder.WriteString(fmt.Sprintf("- Preferred Language: %s\n", memory.UserPreferences.PreferredLanguage))
+			builder.WriteString(fmt.Sprintf("- Code Style: %s\n", memory.UserPreferences.CodeStyle))
 		}
 	}
 
 	// Add language preference enforcement
 	builder.WriteString("\n\n## IMPORTANT Language Requirements:\n")
-	builder.WriteString("- NEVER use Simplified Chinese (简体中文) in responses\n")
+	builder.WriteString("- NEVER use Simplified Chinese (簡體中文) in responses\n")
 	builder.WriteString("- ONLY use Traditional Chinese (繁體中文) or English\n")
 	builder.WriteString("- When responding in Chinese, ensure all characters are Traditional Chinese\n")
 	builder.WriteString("- Prefer English for technical terms and code explanations\n")
@@ -765,45 +788,49 @@ func (p *Processor) getContextAwareSystemPrompt(provider string, enrichedContext
 }
 
 // buildEnrichedContext builds enriched context from workspace detection and memory
-func (p *Processor) buildEnrichedContext(ctx context.Context, request *QueryRequest) (map[string]interface{}, error) {
-	enrichedContext := make(map[string]interface{})
-
+func (p *Processor) buildEnrichedContext(ctx context.Context, request *QueryRequest) (*ProcessorContext, error) {
 	// Step 1: Detect workspace context
 	workspaceContext, err := p.detectWorkspaceContext(ctx, request)
 	if err != nil {
 		p.logger.Warn("Failed to detect workspace context", slog.Any("error", err))
-		workspaceContext = make(map[string]interface{})
+		workspaceContext = &WorkspaceContext{} // Empty but typed
 	}
-	enrichedContext["workspace"] = workspaceContext
 
 	// Step 2: Retrieve relevant memory context
 	memoryContext, err := p.retrieveMemoryContext(ctx, request)
 	if err != nil {
 		p.logger.Warn("Failed to retrieve memory context", slog.Any("error", err))
-		memoryContext = make(map[string]interface{})
+		memoryContext = &MemoryContext{} // Empty but typed
 	}
-	enrichedContext["memory"] = memoryContext
 
 	// Step 3: Analyze query intent and classify
 	queryContext, err := p.analyzeQueryContext(ctx, request)
 	if err != nil {
 		p.logger.Warn("Failed to analyze query context", slog.Any("error", err))
-		queryContext = make(map[string]interface{})
+		queryContext = &QueryContext{} // Empty but typed
 	}
-	enrichedContext["query"] = queryContext
+
+	enrichedContext := &ProcessorContext{
+		Workspace: workspaceContext,
+		Memory:    memoryContext,
+		Query:     queryContext,
+	}
 
 	p.logger.Debug("Built enriched context",
-		slog.Any("workspace_keys", getMapKeys(workspaceContext)),
-		slog.Any("memory_keys", getMapKeys(memoryContext)),
-		slog.Any("query_keys", getMapKeys(queryContext)))
+		slog.String("workspace_project_type", workspaceContext.ProjectType),
+		slog.String("memory_preferred_lang", func() string {
+			if memoryContext.UserPreferences != nil {
+				return memoryContext.UserPreferences.PreferredLanguage
+			}
+			return ""
+		}()),
+		slog.String("query_intent", queryContext.Intent))
 
 	return enrichedContext, nil
 }
 
 // detectWorkspaceContext detects the current workspace context
-func (p *Processor) detectWorkspaceContext(ctx context.Context, request *QueryRequest) (map[string]interface{}, error) {
-	workspaceContext := make(map[string]interface{})
-
+func (p *Processor) detectWorkspaceContext(ctx context.Context, request *QueryRequest) (*WorkspaceContext, error) {
 	// Default workspace detection - in production this would be more sophisticated
 	// TODO: Move these to configuration or environment detection
 	const (
@@ -811,13 +838,21 @@ func (p *Processor) detectWorkspaceContext(ctx context.Context, request *QueryRe
 		defaultLanguage    = "go"
 	)
 
-	workspaceContext["project_type"] = defaultProjectType
-	workspaceContext["primary_language"] = defaultLanguage
-	workspaceContext["project_path"] = "/Users/koopa/go/src/github.com/koopa0/assistant-go" // TODO: Get from environment
-	workspaceContext["git_repository"] = "assistant-go"                                     // TODO: Detect from git
-	workspaceContext["frameworks"] = []string{"net/http", "pgx", "slog"}                    // TODO: Detect from go.mod
-	workspaceContext["tools_available"] = []string{"go_analyzer", "docker", "kubernetes"}   // TODO: Detect available tools
-	workspaceContext["detected_at"] = time.Now()
+	workspaceContext := &WorkspaceContext{
+		ProjectType:        defaultProjectType,
+		Languages:          []string{defaultLanguage},
+		Framework:          "standard_library", // TODO: Detect from go.mod
+		Dependencies:       []string{"net/http", "pgx", "slog"},
+		StructureType:      "monorepo",
+		ConfigFiles:        []string{"go.mod", "go.sum", "configs/development.yaml"},
+		DocumentationStyle: "godoc",
+		Metadata: map[string]string{
+			"project_path":    "/Users/koopa/go/src/github.com/koopa0/assistant-go", // TODO: Get from environment
+			"git_repository":  "assistant-go",                                       // TODO: Detect from git
+			"tools_available": "go_analyzer,docker,kubernetes",                      // TODO: Detect available tools
+			"detected_at":     time.Now().Format(time.RFC3339),
+		},
+	}
 
 	// TODO: Implement actual workspace detection:
 	// - Check current working directory
@@ -830,30 +865,33 @@ func (p *Processor) detectWorkspaceContext(ctx context.Context, request *QueryRe
 }
 
 // retrieveMemoryContext retrieves relevant memory context
-func (p *Processor) retrieveMemoryContext(ctx context.Context, request *QueryRequest) (map[string]interface{}, error) {
-	memoryContext := make(map[string]interface{})
-
+func (p *Processor) retrieveMemoryContext(ctx context.Context, request *QueryRequest) (*MemoryContext, error) {
 	// Default memory context - in production this would query the memory systems
 	// TODO: Integrate with actual memory system once implemented
-	defaultPreferences := map[string]interface{}{
-		"preferred_language":   "go",
-		"code_style":           "standard_library_focused",
-		"documentation":        "comprehensive",
-		"response_language":    "traditional_chinese_or_english",
-		"language_restriction": "never_use_simplified_chinese",
+	userPreferences := &UserPreferences{
+		PreferredLanguage:   "go",
+		CodeStyle:           "standard_library_focused",
+		Documentation:       "comprehensive",
+		ResponseLanguage:    "traditional_chinese_or_english",
+		LanguageRestriction: "never_use_simplified_chinese",
 	}
 
-	memoryContext["working"] = "Implementing context integration for Assistant"
-	memoryContext["recent_knowledge"] = []string{
-		"Go code analysis tools implemented",
-		"Context engine architecture defined",
-		"Memory systems designed and documented",
+	sessionContext := &SessionContext{
+		PreviousQueries: 0, // TODO: Track actual query count
+		SessionStart:    time.Now(),
+		TopicsDiscussed: []string{}, // TODO: Track discussed topics
+		LastActivity:    time.Now(),
 	}
-	memoryContext["user_preferences"] = defaultPreferences
-	memoryContext["session_context"] = map[string]interface{}{
-		"previous_queries": 0, // TODO: Track actual query count
-		"session_start":    time.Now(),
-		"topics_discussed": []string{}, // TODO: Track discussed topics
+
+	memoryContext := &MemoryContext{
+		UserPreferences: userPreferences,
+		SessionContext:  sessionContext,
+		WorkingMemory:   "Implementing context integration for Assistant",
+		RecentTopics: []string{
+			"Go code analysis tools implemented",
+			"Context engine architecture defined",
+			"Memory systems designed and documented",
+		},
 	}
 
 	// TODO: Implement actual memory retrieval:
@@ -866,30 +904,48 @@ func (p *Processor) retrieveMemoryContext(ctx context.Context, request *QueryReq
 }
 
 // analyzeQueryContext analyzes the query for intent and context
-func (p *Processor) analyzeQueryContext(ctx context.Context, request *QueryRequest) (map[string]interface{}, error) {
-	queryContext := make(map[string]interface{})
-
+func (p *Processor) analyzeQueryContext(ctx context.Context, request *QueryRequest) (*QueryContext, error) {
 	query := request.Query
 
 	// Simple intent classification
 	intent := "general"
+	category := "general"
 	if containsAny(query, []string{"analyze", "review", "check", "audit"}) {
 		intent = "code_analysis"
+		category = "analysis"
 	} else if containsAny(query, []string{"implement", "create", "build", "develop"}) {
 		intent = "development"
+		category = "creation"
 	} else if containsAny(query, []string{"debug", "fix", "error", "bug"}) {
 		intent = "debugging"
+		category = "troubleshooting"
 	} else if containsAny(query, []string{"deploy", "kubernetes", "docker", "container"}) {
 		intent = "infrastructure"
+		category = "operations"
 	} else if containsAny(query, []string{"explain", "how", "what", "why"}) {
 		intent = "explanation"
+		category = "learning"
 	}
 
-	queryContext["intent"] = intent
-	queryContext["query_length"] = len(query)
-	queryContext["query_complexity"] = classifyComplexity(query)
-	queryContext["potential_tools"] = suggestTools(query)
-	queryContext["analyzed_at"] = time.Now()
+	complexity := classifyComplexity(query)
+	requiredTools := suggestTools(query)
+	estimatedTokens := len(query) * 2 // Rough estimation
+
+	// Extract keywords (simplified)
+	keywords := extractKeywords(query)
+
+	queryContext := &QueryContext{
+		Intent:          intent,
+		Category:        category,
+		Complexity:      complexity,
+		RequiredTools:   requiredTools,
+		EstimatedTokens: estimatedTokens,
+		Keywords:        keywords,
+		Metadata: map[string]string{
+			"analyzed_at":  time.Now().Format(time.RFC3339),
+			"query_length": fmt.Sprintf("%d", len(query)),
+		},
+	}
 
 	return queryContext, nil
 }
@@ -941,4 +997,31 @@ func suggestTools(query string) []string {
 	}
 
 	return tools
+}
+
+func extractKeywords(query string) []string {
+	// Simple keyword extraction - split by spaces and filter common words
+	words := strings.Fields(strings.ToLower(query))
+	commonWords := map[string]bool{
+		"the": true, "a": true, "an": true, "and": true, "or": true, "but": true,
+		"in": true, "on": true, "at": true, "to": true, "for": true, "of": true,
+		"with": true, "by": true, "is": true, "are": true, "was": true, "were": true,
+		"be": true, "been": true, "have": true, "has": true, "had": true, "do": true,
+		"does": true, "did": true, "will": true, "would": true, "could": true, "should": true,
+		"can": true, "may": true, "might": true, "must": true, "i": true, "you": true,
+		"he": true, "she": true, "it": true, "we": true, "they": true, "me": true,
+		"him": true, "her": true, "us": true, "them": true, "my": true, "your": true,
+		"his": true, "its": true, "our": true, "their": true,
+	}
+
+	keywords := make([]string, 0)
+	for _, word := range words {
+		// Remove punctuation and check if it's not a common word
+		cleanWord := strings.Trim(word, ".,!?;:")
+		if len(cleanWord) > 2 && !commonWords[cleanWord] {
+			keywords = append(keywords, cleanWord)
+		}
+	}
+
+	return keywords
 }

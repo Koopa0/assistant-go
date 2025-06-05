@@ -49,12 +49,12 @@ type Message struct {
 // It provides the persistence layer for maintaining context across
 // multiple interactions with users.
 type ContextManager struct {
-	db     postgres.ClientInterface // Database client for persistence
-	logger *slog.Logger             // Structured logger for debugging
+	db     postgres.DB  // Database client for persistence
+	logger *slog.Logger // Structured logger for debugging
 }
 
 // NewContextManager creates a new context manager
-func NewContextManager(db postgres.ClientInterface, logger *slog.Logger) (*ContextManager, error) {
+func NewContextManager(db postgres.DB, logger *slog.Logger) (*ContextManager, error) {
 	if db == nil {
 		return nil, fmt.Errorf("database client is required")
 	}

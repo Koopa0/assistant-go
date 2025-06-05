@@ -1,19 +1,18 @@
 -- name: CreateConversation :one
-INSERT INTO conversations (user_id, title, metadata)
-VALUES ($1, $2, $3)
-RETURNING id, user_id, title, metadata, created_at, updated_at;
+INSERT INTO conversations (user_id, title, summary, metadata)
+VALUES ($1, $2, $3, $4)
+RETURNING id, user_id, title, summary, metadata, is_archived, created_at, updated_at;
 
 -- name: GetConversation :one
-SELECT id, user_id, title, metadata, created_at, updated_at
+SELECT id, user_id, title, summary, metadata, is_archived, created_at, updated_at
 FROM conversations
 WHERE id = $1;
 
 -- name: GetConversationsByUser :many
-SELECT id, user_id, title, metadata, created_at, updated_at
+SELECT id, user_id, title, summary, metadata, is_archived, created_at, updated_at
 FROM conversations
 WHERE user_id = $1
-ORDER BY updated_at DESC
-LIMIT $2 OFFSET $3;
+ORDER BY updated_at DESC;
 
 -- name: UpdateConversation :one
 UPDATE conversations

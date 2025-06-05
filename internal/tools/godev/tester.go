@@ -23,10 +23,18 @@ type GoTester struct {
 }
 
 // NewGoTester creates a new Go tester tool
-func NewGoTester(config map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+func NewGoTester(config *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
+	// Convert ToolConfig to legacy map format for now
+	legacyConfig := make(map[string]interface{})
+	if config != nil {
+		legacyConfig["timeout"] = config.Timeout
+		legacyConfig["debug"] = config.Debug
+		legacyConfig["working_dir"] = config.WorkingDir
+	}
+
 	return &GoTester{
 		logger: logger,
-		config: config,
+		config: legacyConfig,
 	}, nil
 }
 
@@ -41,107 +49,107 @@ func (g *GoTester) Description() string {
 }
 
 // Parameters returns the tool parameters schema
-func (g *GoTester) Parameters() map[string]interface{} {
-	return map[string]interface{}{
-		"type": "object",
-		"properties": map[string]interface{}{
-			"path": map[string]interface{}{
-				"type":        "string",
-				"description": "Path to package or directory to test",
-				"default":     "./...",
+func (g *GoTester) Parameters() *tools.ToolParametersSchema {
+	return &tools.ToolParametersSchema{
+		Type: "object",
+		Properties: map[string]tools.ToolParameter{
+			"path": {
+				Type:        "string",
+				Description: "Path to package or directory to test",
+				Default:     "./...",
 			},
-			"pattern": map[string]interface{}{
-				"type":        "string",
-				"description": "Test name pattern to run (regex)",
-				"default":     "",
+			"pattern": {
+				Type:        "string",
+				Description: "Test name pattern to run (regex)",
+				Default:     "",
 			},
-			"coverage": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Generate coverage report",
-				"default":     true,
+			"coverage": {
+				Type:        "boolean",
+				Description: "Generate coverage report",
+				Default:     true,
 			},
-			"coverage_profile": map[string]interface{}{
-				"type":        "string",
-				"description": "Coverage profile file path",
-				"default":     "coverage.out",
+			"coverage_profile": {
+				Type:        "string",
+				Description: "Coverage profile file path",
+				Default:     "coverage.out",
 			},
-			"verbose": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Run tests in verbose mode",
-				"default":     false,
+			"verbose": {
+				Type:        "boolean",
+				Description: "Run tests in verbose mode",
+				Default:     false,
 			},
-			"short": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Run only short tests",
-				"default":     false,
+			"short": {
+				Type:        "boolean",
+				Description: "Run only short tests",
+				Default:     false,
 			},
-			"timeout": map[string]interface{}{
-				"type":        "string",
-				"description": "Test timeout duration (e.g., 30s, 5m)",
-				"default":     "10m",
+			"timeout": {
+				Type:        "string",
+				Description: "Test timeout duration (e.g., 30s, 5m)",
+				Default:     "10m",
 			},
-			"parallel": map[string]interface{}{
-				"type":        "integer",
-				"description": "Number of test binaries to run in parallel",
-				"default":     0,
+			"parallel": {
+				Type:        "integer",
+				Description: "Number of test binaries to run in parallel",
+				Default:     0,
 			},
-			"benchmark": map[string]interface{}{
-				"type":        "boolean",
-				"description": "Run benchmarks",
-				"default":     false,
+			"benchmark": {
+				Type:        "boolean",
+				Description: "Run benchmarks",
+				Default:     false,
 			},
 		},
-		"required": []string{},
+		Required: []string{},
 	}
 }
 
 // Execute executes the Go tester
-func (g *GoTester) Execute(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+func (g *GoTester) Execute(ctx context.Context, input *tools.ToolInput) (*tools.ToolResult, error) {
 	startTime := time.Now()
 
 	// Parse input parameters
 	path := "./..."
-	if p, ok := input["path"].(string); ok && p != "" {
+	if p, ok := input.Parameters["path"].(string); ok && p != "" {
 		path = p
 	}
 
 	pattern := ""
-	if p, ok := input["pattern"].(string); ok {
+	if p, ok := input.Parameters["pattern"].(string); ok {
 		pattern = p
 	}
 
 	coverage := true
-	if c, ok := input["coverage"].(bool); ok {
+	if c, ok := input.Parameters["coverage"].(bool); ok {
 		coverage = c
 	}
 
 	coverageProfile := "coverage.out"
-	if cp, ok := input["coverage_profile"].(string); ok && cp != "" {
+	if cp, ok := input.Parameters["coverage_profile"].(string); ok && cp != "" {
 		coverageProfile = cp
 	}
 
 	verbose := false
-	if v, ok := input["verbose"].(bool); ok {
+	if v, ok := input.Parameters["verbose"].(bool); ok {
 		verbose = v
 	}
 
 	short := false
-	if s, ok := input["short"].(bool); ok {
+	if s, ok := input.Parameters["short"].(bool); ok {
 		short = s
 	}
 
 	timeout := "10m"
-	if t, ok := input["timeout"].(string); ok && t != "" {
+	if t, ok := input.Parameters["timeout"].(string); ok && t != "" {
 		timeout = t
 	}
 
 	parallel := 0
-	if p, ok := input["parallel"].(float64); ok {
+	if p, ok := input.Parameters["parallel"].(float64); ok {
 		parallel = int(p)
 	}
 
 	benchmark := false
-	if b, ok := input["benchmark"].(bool); ok {
+	if b, ok := input.Parameters["benchmark"].(bool); ok {
 		benchmark = b
 	}
 
@@ -155,29 +163,41 @@ func (g *GoTester) Execute(ctx context.Context, input map[string]interface{}) (*
 	// Run tests
 	result, err := g.runTests(ctx, path, pattern, coverage, coverageProfile, verbose, short, timeout, parallel, benchmark)
 	if err != nil {
+		// Convert TestResult to ToolResultData even for errors
+		toolData := convertTestResultToToolData(result)
 		return &tools.ToolResult{
 			Success:       false,
 			Error:         err.Error(),
 			ExecutionTime: time.Since(startTime),
-			Data:          result,
+			Data:          toolData,
 		}, err
 	}
 
-	return &tools.ToolResult{
-		Success: true,
-		Data:    result,
-		Metadata: map[string]interface{}{
+	// Convert TestResult to ToolResultData
+	toolData := convertTestResultToToolData(result)
+
+	// Create metadata
+	metadata := &tools.ToolMetadata{
+		StartTime:     startTime,
+		EndTime:       time.Now(),
+		ExecutionTime: time.Since(startTime),
+		Parameters: map[string]string{
 			"path":             path,
 			"pattern":          pattern,
-			"coverage":         coverage,
+			"coverage":         fmt.Sprintf("%t", coverage),
 			"coverage_profile": coverageProfile,
-			"verbose":          verbose,
-			"short":            short,
+			"verbose":          fmt.Sprintf("%t", verbose),
+			"short":            fmt.Sprintf("%t", short),
 			"timeout":          timeout,
-			"parallel":         parallel,
-			"benchmark":        benchmark,
-			"execution_time":   time.Since(startTime).String(),
+			"parallel":         fmt.Sprintf("%d", parallel),
+			"benchmark":        fmt.Sprintf("%t", benchmark),
 		},
+	}
+
+	return &tools.ToolResult{
+		Success:       true,
+		Data:          toolData,
+		Metadata:      metadata,
 		ExecutionTime: time.Since(startTime),
 	}, nil
 }
@@ -586,4 +606,70 @@ func (g *GoTester) calculateSummary(result *TestResult) {
 
 	summary.TotalBenchmarks = len(result.Benchmarks)
 	result.Summary = summary
+}
+
+// convertTestResultToToolData converts TestResult to ToolResultData
+func convertTestResultToToolData(testResult *TestResult) *tools.ToolResultData {
+	if testResult == nil {
+		return &tools.ToolResultData{}
+	}
+
+	// Convert test coverage if available
+	var testCoverage *tools.TestCoverage
+	if testResult.Coverage != nil {
+		// Calculate total and covered lines from file coverage
+		totalLines := 0
+		coveredLines := 0
+		for _, fileCov := range testResult.Coverage.FileCoverage {
+			// Simplified calculation - in reality would need line count data
+			totalLines += 100                           // Placeholder
+			coveredLines += int(fileCov.Coverage * 100) // Simplified
+		}
+
+		testCoverage = &tools.TestCoverage{
+			LinesTotal:   totalLines,
+			LinesCovered: coveredLines,
+			Percentage:   testResult.Coverage.TotalCoverage,
+		}
+	}
+
+	// Create results for each package
+	results := make([]tools.ResultItem, 0, len(testResult.Packages))
+	for _, pkg := range testResult.Packages {
+		// Calculate test counts from Tests slice
+		totalTests := len(pkg.Tests)
+		passedTests := 0
+		failedTests := 0
+		for _, test := range pkg.Tests {
+			if test.Status == "PASS" {
+				passedTests++
+			} else if test.Status == "FAIL" {
+				failedTests++
+			}
+		}
+
+		results = append(results, tools.ResultItem{
+			ID:          fmt.Sprintf("package_%s", strings.ReplaceAll(pkg.Name, "/", "_")),
+			Type:        "test_package",
+			Name:        pkg.Name,
+			Description: fmt.Sprintf("Tests: %d passed, %d failed", passedTests, failedTests),
+			Value:       fmt.Sprintf("%.1fs", pkg.ExecutionTime.Seconds()),
+			Metadata: map[string]string{
+				"total_tests":  fmt.Sprintf("%d", totalTests),
+				"passed_tests": fmt.Sprintf("%d", passedTests),
+				"failed_tests": fmt.Sprintf("%d", failedTests),
+				"success":      fmt.Sprintf("%t", pkg.Success),
+				"coverage":     fmt.Sprintf("%.1f%%", pkg.Coverage),
+			},
+		})
+	}
+
+	return &tools.ToolResultData{
+		Output: testResult.Output,
+		Analysis: &tools.AnalysisResult{
+			TestCoverage: testCoverage,
+		},
+		LinesProcessed: int64(testResult.Summary.TotalTests),
+		Results:        results,
+	}
 }

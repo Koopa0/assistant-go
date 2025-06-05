@@ -247,9 +247,17 @@ func (ce *ContextEngine) calculateConfidence(workspace WorkspaceInfo, history Te
 // notifySubscribers notifies all subscribers of context updates
 func (ce *ContextEngine) notifySubscribers(ctx context.Context, update ContextUpdate) {
 	for _, subscriber := range ce.subscribers {
-		if err := subscriber.OnContextUpdate(ctx, update); err != nil {
-			ce.logger.Warn("Failed to notify context subscriber", slog.Any("error", err))
-		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					ce.logger.Error("Panic in context subscriber", slog.Any("panic", r))
+				}
+			}()
+
+			if err := subscriber.OnContextUpdate(ctx, update); err != nil {
+				ce.logger.Warn("Failed to notify context subscriber", slog.Any("error", err))
+			}
+		}()
 	}
 }
 
