@@ -69,10 +69,17 @@ configs/local.yaml
 # Demo and validation scripts (not for public repo)
 demo_cli.sh
 scripts/test-demo.sh
-scripts/validate-implementation.sh
+scripts/validate-implementuuidation.sh
 
 # Local documentation (not for public repo)
 **/README.zh-Hant.md
+.docs
+.test
+.CLAUDE-ARCHITECTURE.md
+.CLAUDE.md
+.MCP.md
+.prompt.md
+
 
 # Profiling files
 *.pprof
