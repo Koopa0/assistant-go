@@ -8,29 +8,10 @@ import (
 	"strings"
 )
 
-// Validate validates the configuration
+// Validate validates the configuration using enhanced validation
 func Validate(cfg *Config) error {
-	if err := validateRequired(cfg); err != nil {
-		return fmt.Errorf("required field validation failed: %w", err)
-	}
-
-	if err := validateDatabase(cfg.Database); err != nil {
-		return fmt.Errorf("database configuration validation failed: %w", err)
-	}
-
-	if err := validateServer(cfg.Server); err != nil {
-		return fmt.Errorf("server configuration validation failed: %w", err)
-	}
-
-	if err := validateAI(cfg.AI); err != nil {
-		return fmt.Errorf("AI configuration validation failed: %w", err)
-	}
-
-	if err := validateTools(cfg.Tools); err != nil {
-		return fmt.Errorf("tools configuration validation failed: %w", err)
-	}
-
-	return nil
+	// Use enhanced validation for better error reporting
+	return ValidateConfigWithObservability(cfg)
 }
 
 // validateRequired validates required fields

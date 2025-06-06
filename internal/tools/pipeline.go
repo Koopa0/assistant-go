@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/koopa0/assistant-go/internal/observability"
+	"github.com/koopa0/assistant-go/internal/platform/observability"
 )
 
 // Pipeline represents a tool execution pipeline with monitoring and optimization

@@ -11,17 +11,20 @@ import (
 	"github.com/tmc/langchaingo/llms"
 
 	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant-go/internal/core/conversation"
 	"github.com/koopa0/assistant-go/internal/langchain"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
 	"github.com/koopa0/assistant-go/internal/tools"
+	"github.com/koopa0/assistant-go/internal/tools/docker"
 	"github.com/koopa0/assistant-go/internal/tools/godev"
+	postgrestool "github.com/koopa0/assistant-go/internal/tools/postgres"
 )
 
 // Assistant is the core orchestrator of the intelligent development companion.
 // It coordinates all major subsystems including:
 // - Request processing through the Processor
 // - Tool management via the Registry
-// - Conversation management through ContextManager
+// - Conversation management through Manager
 // - Database operations for persistence
 //
 // The Assistant provides a unified interface for:
@@ -31,13 +34,13 @@ import (
 // - Health monitoring of all subsystems
 // - Graceful shutdown and resource cleanup
 type Assistant struct {
-	config           *config.Config     // Application configuration
-	db               postgres.DB        // Database client for persistence
-	logger           *slog.Logger       // Structured logger
-	registry         *tools.Registry    // Tool registry for available tools
-	processor        *Processor         // Request processing pipeline
-	context          *ContextManager    // Conversation context manager
-	langchainService *langchain.Service // LangChain integration service
+	config           *config.Config        // Application configuration
+	db               postgres.DB           // Database client for persistence
+	logger           *slog.Logger          // Structured logger
+	registry         *tools.Registry       // Tool registry for available tools
+	processor        *Processor            // Request processing pipeline
+	conversationMgr  *conversation.Manager // Conversation manager
+	langchainService *langchain.Service    // LangChain integration service
 }
 
 // QueryRequest represents a comprehensive query request to the Assistant.
@@ -142,7 +145,7 @@ func New(ctx context.Context, cfg *config.Config, db postgres.DB, logger *slog.L
 	registry := tools.NewRegistry(logger)
 
 	// Initialize context manager
-	contextManager, err := NewContextManager(db, logger)
+	conversationMgr, err := conversation.NewManager(db, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize context manager: %w", err)
 	}
@@ -183,7 +186,7 @@ func New(ctx context.Context, cfg *config.Config, db postgres.DB, logger *slog.L
 		logger:           logger,
 		registry:         registry,
 		processor:        processor,
-		context:          contextManager,
+		conversationMgr:  conversationMgr,
 		langchainService: langchainService,
 	}
 
@@ -243,11 +246,11 @@ func (a *Assistant) ProcessQuery(ctx context.Context, query string) (string, err
 //   - error: Processing error if any
 func (a *Assistant) ProcessQueryRequest(ctx context.Context, request *QueryRequest) (*QueryResponse, error) {
 	if request == nil {
-		return nil, NewInvalidInputError("request is required", nil)
+		return nil, NewAssistantInvalidInputError("request is required", request)
 	}
 
 	if request.Query == "" {
-		return nil, NewInvalidInputError("query is required", nil)
+		return nil, NewAssistantEmptyInputError()
 	}
 
 	startTime := time.Now()
@@ -279,18 +282,18 @@ func (a *Assistant) ProcessQueryRequest(ctx context.Context, request *QueryReque
 }
 
 // GetConversation retrieves a conversation by ID
-func (a *Assistant) GetConversation(ctx context.Context, conversationID string) (*Conversation, error) {
-	return a.context.GetConversation(ctx, conversationID)
+func (a *Assistant) GetConversation(ctx context.Context, conversationID string) (*conversation.Conversation, error) {
+	return a.conversationMgr.GetConversation(ctx, conversationID)
 }
 
 // ListConversations lists conversations for a user
-func (a *Assistant) ListConversations(ctx context.Context, userID string, limit, offset int) ([]*Conversation, error) {
-	return a.context.ListConversations(ctx, userID, limit, offset)
+func (a *Assistant) ListConversations(ctx context.Context, userID string, limit, offset int) ([]*conversation.Conversation, error) {
+	return a.conversationMgr.ListConversations(ctx, userID, limit, offset)
 }
 
 // DeleteConversation deletes a conversation
 func (a *Assistant) DeleteConversation(ctx context.Context, conversationID string) error {
-	return a.context.DeleteConversation(ctx, conversationID)
+	return a.conversationMgr.DeleteConversation(ctx, conversationID)
 }
 
 // GetAvailableTools returns a list of available tools
@@ -347,7 +350,7 @@ func (a *Assistant) Close(ctx context.Context) error {
 	}
 
 	// Close context manager
-	if err := a.context.Close(ctx); err != nil {
+	if err := a.conversationMgr.Close(ctx); err != nil {
 		a.logger.Error("Failed to close context manager", slog.Any("error", err))
 	}
 
@@ -364,56 +367,32 @@ func (a *Assistant) Close(ctx context.Context) error {
 func (a *Assistant) registerBuiltinTools(ctx context.Context) error {
 	a.logger.Debug("Registering built-in tools...")
 
-	// Register Go development tools
-	if err := a.registerGoTools(); err != nil {
-		return fmt.Errorf("failed to register Go tools: %w", err)
+	// Register Go development tool factory
+	godevFactory := func(cfg *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
+		return godev.NewGoDevTool(logger), nil
+	}
+	if err := a.registry.Register("godev", godevFactory); err != nil {
+		return fmt.Errorf("failed to register godev tool: %w", err)
 	}
 
-	// TODO: Register additional tools as they are implemented
-	// PostgreSQL tools, Docker tools, Kubernetes tools, etc.
-
-	a.logger.Debug("Built-in tools registered successfully")
-	return nil
-}
-
-// registerGoTools registers Go development tools
-func (a *Assistant) registerGoTools() error {
-	// Register Go Analyzer
-	if err := a.registry.Register("go_analyzer", func(config *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
-		return godev.NewGoAnalyzer(config, logger)
-	}); err != nil {
-		return fmt.Errorf("failed to register go_analyzer: %w", err)
+	// Register Docker tool factory
+	dockerFactory := func(cfg *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
+		return docker.NewDockerTool(logger), nil
+	}
+	if err := a.registry.Register("docker", dockerFactory); err != nil {
+		return fmt.Errorf("failed to register docker tool: %w", err)
 	}
 
-	// Register Go Formatter
-	if err := a.registry.Register("go_formatter", func(config *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
-		return godev.NewGoFormatter(config, logger)
-	}); err != nil {
-		return fmt.Errorf("failed to register go_formatter: %w", err)
+	// Register PostgreSQL tool factory
+	postgresFactory := func(cfg *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
+		return postgrestool.NewPostgresTool(logger), nil
+	}
+	if err := a.registry.Register("postgres", postgresFactory); err != nil {
+		return fmt.Errorf("failed to register postgres tool: %w", err)
 	}
 
-	// Register Go Tester
-	if err := a.registry.Register("go_tester", func(config *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
-		return godev.NewGoTester(config, logger)
-	}); err != nil {
-		return fmt.Errorf("failed to register go_tester: %w", err)
-	}
-
-	// Register Go Builder
-	if err := a.registry.Register("go_builder", func(config *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
-		return godev.NewGoBuilder(config, logger)
-	}); err != nil {
-		return fmt.Errorf("failed to register go_builder: %w", err)
-	}
-
-	// Register Go Dependency Analyzer
-	if err := a.registry.Register("go_dependency_analyzer", func(config *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
-		return godev.NewGoDependencyAnalyzer(config, logger)
-	}); err != nil {
-		return fmt.Errorf("failed to register go_dependency_analyzer: %w", err)
-	}
-
-	a.logger.Debug("Go development tools registered")
+	a.logger.Debug("Built-in tools registered successfully",
+		slog.Int("count", 3))
 	return nil
 }
 
@@ -566,11 +545,11 @@ type ToolExecutionRequest struct {
 //   - error: Execution error if any
 func (a *Assistant) ExecuteTool(ctx context.Context, req *ToolExecutionRequest) (*tools.ToolResult, error) {
 	if req == nil {
-		return nil, NewInvalidInputError("tool execution request is required", nil)
+		return nil, NewAssistantInvalidInputError("request is required", req)
 	}
 
 	if req.ToolName == "" {
-		return nil, NewInvalidInputError("tool name is required", nil)
+		return nil, NewAssistantInvalidInputError("tool_name is required", req.ToolName)
 	}
 
 	a.logger.Info("Executing tool directly",
@@ -607,4 +586,12 @@ func (a *Assistant) ExecuteTool(ctx context.Context, req *ToolExecutionRequest) 
 // GetLangChainService returns the LangChain service instance if available
 func (a *Assistant) GetLangChainService() *langchain.Service {
 	return a.langchainService
+}
+
+// ProcessQueryStream processes a query and returns a streaming response
+func (a *Assistant) ProcessQueryStream(ctx context.Context, query string) (*StreamingResponse, error) {
+	request := &QueryRequest{
+		Query: query,
+	}
+	return a.ProcessQueryStreamEnhanced(ctx, request)
 }

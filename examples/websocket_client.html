@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Assistant WebSocket Streaming Demo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        #queryInput {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        
+        button:hover {
+            background: #0056b3;
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        #output {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-family: Monaco, Consolas, monospace;
+            font-size: 14px;
+        }
+        
+        .status {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .status.connected {
+            color: #28a745;
+        }
+        
+        .status.error {
+            color: #dc3545;
+        }
+        
+        .metadata {
+            margin-top: 10px;
+            padding: 10px;
+            background: #e9ecef;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        
+        .streaming-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: #28a745;
+            border-radius: 50%;
+            margin-left: 5px;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Assistant WebSocket Streaming Demo</h1>
+        
+        <div class="input-group">
+            <input 
+                type="text" 
+                id="queryInput" 
+                placeholder="Ask a question..." 
+                value="Explain Go channels in simple terms"
+            >
+            <button id="sendBtn" onclick="sendQuery()">Send</button>
+            <button id="connectBtn" onclick="toggleConnection()">Connect</button>
+        </div>
+        
+        <div id="output"></div>
+        
+        <div id="status" class="status">Disconnected</div>
+        <div id="metadata" class="metadata" style="display: none;"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let isConnected = false;
+        let startTime = null;
+        let charCount = 0;
+
+        function connect() {
+            const wsUrl = 'ws://localhost:8080/ws/stream';
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                isConnected = true;
+                updateStatus('Connected', 'connected');
+                document.getElementById('connectBtn').textContent = 'Disconnect';
+                document.getElementById('sendBtn').disabled = false;
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleMessage(data);
+            };
+            
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                updateStatus('Connection error', 'error');
+            };
+            
+            ws.onclose = () => {
+                isConnected = false;
+                updateStatus('Disconnected', '');
+                document.getElementById('connectBtn').textContent = 'Connect';
+                document.getElementById('sendBtn').disabled = true;
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+        }
+
+        function toggleConnection() {
+            if (isConnected) {
+                disconnect();
+            } else {
+                connect();
+            }
+        }
+
+        function sendQuery() {
+            const query = document.getElementById('queryInput').value.trim();
+            if (!query || !isConnected) return;
+            
+            // Clear output and metadata
+            document.getElementById('output').textContent = '';
+            document.getElementById('metadata').style.display = 'none';
+            
+            // Reset counters
+            startTime = Date.now();
+            charCount = 0;
+            
+            // Send query
+            ws.send(JSON.stringify({ query }));
+            
+            // Show streaming indicator
+            updateStatus('Streaming', 'connected');
+            const indicator = document.createElement('span');
+            indicator.className = 'streaming-indicator';
+            document.getElementById('status').appendChild(indicator);
+        }
+
+        function handleMessage(data) {
+            const output = document.getElementById('output');
+            
+            switch (data.type) {
+                case 'start':
+                    console.log('Stream started:', data.metadata);
+                    break;
+                    
+                case 'chunk':
+                    output.textContent += data.content;
+                    charCount += data.content.length;
+                    output.scrollTop = output.scrollHeight;
+                    break;
+                    
+                case 'event':
+                    console.log('Event:', data.metadata);
+                    break;
+                    
+                case 'error':
+                    output.textContent += `\n\nError: ${data.error}`;
+                    updateStatus('Error occurred', 'error');
+                    break;
+                    
+                case 'complete':
+                    const elapsed = Date.now() - startTime;
+                    const speed = (charCount / (elapsed / 1000)).toFixed(2);
+                    
+                    updateStatus('Complete', 'connected');
+                    
+                    // Show metadata
+                    const metadata = document.getElementById('metadata');
+                    metadata.style.display = 'block';
+                    metadata.innerHTML = `
+                        <strong>Streaming Stats:</strong><br>
+                        Characters: ${charCount}<br>
+                        Time: ${(elapsed / 1000).toFixed(2)}s<br>
+                        Speed: ${speed} chars/sec<br>
+                        ${data.metadata ? `<br><strong>Response Metadata:</strong><br>${JSON.stringify(data.metadata, null, 2)}` : ''}
+                    `;
+                    break;
+                    
+                case 'end':
+                    console.log('Stream ended');
+                    break;
+            }
+        }
+
+        function updateStatus(text, className) {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            status.className = 'status ' + className;
+        }
+
+        // Handle Enter key in input
+        document.getElementById('queryInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter' && isConnected) {
+                sendQuery();
+            }
+        });
+
+        // Auto-connect on load
+        window.onload = () => {
+            setTimeout(connect, 500);
+        };
+    </script>
+</body>
+</html>

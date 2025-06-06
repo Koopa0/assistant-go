@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
 	"github.com/koopa0/assistant-go/internal/testutil"
 	"github.com/koopa0/assistant-go/internal/tools"
 )
@@ -630,7 +630,7 @@ func TestExecutionTimeoutHandling(t *testing.T) {
 		},
 	}
 
-	_ = assistant.registry.Register("slow_tool", func(cfg map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+	_ = assistant.registry.Register("slow_tool", func(cfg *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
 		return slowTool, nil
 	})
 
@@ -682,7 +682,7 @@ func TestRecoveryFromPanics(t *testing.T) {
 		},
 	}
 
-	_ = assistant.registry.Register("panic_tool", func(cfg map[string]interface{}, logger *slog.Logger) (tools.Tool, error) {
+	_ = assistant.registry.Register("panic_tool", func(cfg *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
 		return panicTool, nil
 	})
 
@@ -733,12 +733,21 @@ type mockTool struct {
 
 func (m *mockTool) Name() string        { return m.name }
 func (m *mockTool) Description() string { return "Mock tool for testing" }
-func (m *mockTool) Parameters() map[string]interface{} {
-	return map[string]interface{}{"type": "object"}
+func (m *mockTool) Parameters() *tools.ToolParametersSchema {
+	return &tools.ToolParametersSchema{
+		Type:       "object",
+		Properties: make(map[string]tools.ToolParameter),
+		Required:   []string{},
+	}
 }
-func (m *mockTool) Execute(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+func (m *mockTool) Execute(ctx context.Context, input *tools.ToolInput) (*tools.ToolResult, error) {
 	if m.executeFunc != nil {
-		return m.executeFunc(ctx, input)
+		// Convert new input format to legacy format for the mock function
+		legacyInput := input.Parameters
+		if legacyInput == nil {
+			legacyInput = make(map[string]interface{})
+		}
+		return m.executeFunc(ctx, legacyInput)
 	}
 	return &tools.ToolResult{Success: true}, nil
 }
@@ -753,12 +762,21 @@ type mockToolAdvanced struct {
 
 func (m *mockToolAdvanced) Name() string        { return m.name }
 func (m *mockToolAdvanced) Description() string { return "Mock tool for testing" }
-func (m *mockToolAdvanced) Parameters() map[string]interface{} {
-	return map[string]interface{}{"type": "object"}
+func (m *mockToolAdvanced) Parameters() *tools.ToolParametersSchema {
+	return &tools.ToolParametersSchema{
+		Type:       "object",
+		Properties: make(map[string]tools.ToolParameter),
+		Required:   []string{},
+	}
 }
-func (m *mockToolAdvanced) Execute(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+func (m *mockToolAdvanced) Execute(ctx context.Context, input *tools.ToolInput) (*tools.ToolResult, error) {
 	if m.executeFunc != nil {
-		return m.executeFunc(ctx, input)
+		// Convert new input format to legacy format for the mock function
+		legacyInput := input.Parameters
+		if legacyInput == nil {
+			legacyInput = make(map[string]interface{})
+		}
+		return m.executeFunc(ctx, legacyInput)
 	}
 	return &tools.ToolResult{Success: true}, nil
 }

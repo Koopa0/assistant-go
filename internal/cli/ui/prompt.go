@@ -115,7 +115,7 @@ func Confirm(message string, defaultYes bool) bool {
 }
 
 // SelectOption shows a selection prompt
-func SelectOption(message string, options []string) (int, error) {
+func SelectOption(message string, options []string) int {
 	fmt.Println(Info.Sprint(message))
 
 	for i, option := range options {
@@ -129,14 +129,14 @@ func SelectOption(message string, options []string) (int, error) {
 	var choice int
 	_, err := fmt.Scanf("%d", &choice)
 	if err != nil {
-		return -1, err
+		return 0
 	}
 
 	if choice < 1 || choice > len(options) {
-		return -1, fmt.Errorf("invalid choice: %d", choice)
+		return 0
 	}
 
-	return choice - 1, nil
+	return choice - 1
 }
 
 // InputText shows a text input prompt

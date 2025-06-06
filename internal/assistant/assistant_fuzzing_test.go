@@ -7,7 +7,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	customerrors "github.com/koopa0/assistant-go/internal/errors"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
 	"github.com/koopa0/assistant-go/internal/testutil"
 	"github.com/koopa0/assistant-go/internal/tools"
 )
@@ -134,7 +135,7 @@ func FuzzErrorHandling(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, code, message string) {
 		// Property: AssistantError should always be constructible
-		err := NewAssistantError(code, message, nil)
+		err := customerrors.NewAssistantError(code, message, nil)
 		if err == nil {
 			t.Fatal("NewAssistantError returned nil")
 		}
@@ -158,7 +159,7 @@ func FuzzErrorHandling(f *testing.F) {
 		}
 
 		// Property: Error response conversion should work
-		response := ToErrorResponse(err)
+		response := customerrors.ToErrorResponse(err)
 		if response == nil {
 			t.Fatal("ToErrorResponse returned nil")
 		}
@@ -236,8 +237,10 @@ func FuzzToolNameValidation(f *testing.F) {
 
 		// Property: Tool not found error should be consistent
 		err := NewToolNotFoundError(toolName)
-		if err.Code != CodeToolNotFound {
-			t.Errorf("Expected code %s, got %s", CodeToolNotFound, err.Code)
+		if assistantErr := customerrors.GetAssistantError(err); assistantErr != nil {
+			if assistantErr.Code != CodeAssistantToolError {
+				t.Errorf("Expected code %s, got %s", CodeAssistantToolError, assistantErr.Code)
+			}
 		}
 	})
 }

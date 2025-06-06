@@ -6,12 +6,18 @@ BINARY_NAME=assistant
 MAIN_PATH=./cmd/assistant
 BUILD_DIR=./bin
 DOCKER_IMAGE=assistant
-VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-COMMIT?=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "0.1.0-dev")
+COMMIT?=$(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
+BRANCH?=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
 BUILD_TIME?=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
+BUILD_USER?=$(shell whoami 2>/dev/null || echo "unknown")
 
-# Go build flags
-LDFLAGS=-ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.buildTime=$(BUILD_TIME)"
+# Go build flags with version package
+LDFLAGS=-ldflags "-X github.com/koopa0/assistant-go/internal/version.Version=$(VERSION) \
+	-X github.com/koopa0/assistant-go/internal/version.GitCommit=$(COMMIT) \
+	-X github.com/koopa0/assistant-go/internal/version.GitBranch=$(BRANCH) \
+	-X github.com/koopa0/assistant-go/internal/version.BuildTime=$(BUILD_TIME) \
+	-X github.com/koopa0/assistant-go/internal/version.BuildUser=$(BUILD_USER)"
 GO_BUILD_FLAGS=-trimpath $(LDFLAGS)
 
 # Tools

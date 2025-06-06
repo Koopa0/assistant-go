@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
 )
 
 // PersonalizationMemory implements persistent storage for user preferences and contextual information

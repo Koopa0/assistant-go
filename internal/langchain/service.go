@@ -8,11 +8,11 @@ import (
 
 	"github.com/tmc/langchaingo/llms"
 
-	"github.com/koopa0/assistant-go/internal/agent"
 	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant-go/internal/core/agent"
 	"github.com/koopa0/assistant-go/internal/langchain/chains"
 	"github.com/koopa0/assistant-go/internal/langchain/memory"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
 )
 
 // Service represents the main LangChain service that integrates all components
@@ -61,11 +61,9 @@ func NewService(cfg ServiceConfig) (*Service, error) {
 	// Initialize chain manager
 	chainManager := chains.NewChainManager(cfg.Logger)
 
-	// Initialize individual agents
-	var developmentAgent *agents.DevelopmentAgent
-	var databaseAgent *agents.DatabaseAgent
-	var infrastructureAgent *agents.InfrastructureAgent
-	var researchAgent *agents.ResearchAgent
+	// Initialize agent manager and agents
+	agentManager := agent.NewSimpleManager(cfg.Logger)
+	agents := make(map[agent.AgentType]*agent.LangChainAdapter)
 
 	// Create agents with available LLM providers
 	if len(cfg.LLMProviders) > 0 {
@@ -76,23 +74,25 @@ func NewService(cfg ServiceConfig) (*Service, error) {
 			break
 		}
 
-		developmentAgent = agents.NewDevelopmentAgent(primaryLLM, cfg.Config, cfg.Logger)
-		databaseAgent = agents.NewDatabaseAgent(primaryLLM, cfg.Config, cfg.DBClient, cfg.Logger)
-		infrastructureAgent = agents.NewInfrastructureAgent(primaryLLM, cfg.Config, cfg.Logger)
-		researchAgent = agents.NewResearchAgent(primaryLLM, cfg.Config, cfg.Logger)
+		// Create development agent (the only one currently implemented)
+		if devAgent := agent.NewDevelopmentAgent(primaryLLM, cfg.Logger); devAgent != nil {
+			// Create LangChain adapter for the development agent
+			langchainAdapter := agent.NewLangChainAdapter(devAgent)
+			agents[agent.TypeDevelopment] = langchainAdapter
+		}
+
+		// TODO: Implement other agents (database, infrastructure, research) when needed
 	}
 
 	service := &Service{
-		config:              cfg.Config,
-		logger:              cfg.Logger,
-		dbClient:            cfg.DBClient,
-		memoryManager:       memoryManager,
-		chainManager:        chainManager,
-		developmentAgent:    developmentAgent,
-		databaseAgent:       databaseAgent,
-		infrastructureAgent: infrastructureAgent,
-		researchAgent:       researchAgent,
-		llmProviders:        cfg.LLMProviders,
+		config:        cfg.Config,
+		logger:        cfg.Logger,
+		dbClient:      cfg.DBClient,
+		memoryManager: memoryManager,
+		chainManager:  chainManager,
+		agentManager:  agentManager,
+		agents:        agents,
+		llmProviders:  cfg.LLMProviders,
 	}
 
 	cfg.Logger.Info("LangChain service initialized successfully",
@@ -108,45 +108,49 @@ func NewService(cfg ServiceConfig) (*Service, error) {
 // AgentExecutionRequest wraps the agent request with user context
 type AgentExecutionRequest struct {
 	UserID string `json:"user_id"`
-	*agents.AgentRequest
+	*agent.Request
 }
 
 // ExecuteAgent executes an agent with the given request
-func (s *Service) ExecuteAgent(ctx context.Context, agentType agents.AgentType, request *AgentExecutionRequest) (*agents.AgentResponse, error) {
+func (s *Service) ExecuteAgent(ctx context.Context, agentType agent.AgentType, request *AgentExecutionRequest) (*agent.Response, error) {
 	startTime := time.Now()
 
 	s.logger.Info("Executing agent",
 		slog.String("agent_type", string(agentType)),
 		slog.String("user_id", request.UserID),
-		slog.String("query", request.AgentRequest.Query))
+		slog.String("query", request.Request.Query))
 
-	// Execute the appropriate agent
-	var response *agents.AgentResponse
+	// Execute agent using the agent manager
+	var response *agent.Response
 	var err error
 
-	switch agentType {
-	case agents.AgentTypeDevelopment:
-		if s.developmentAgent == nil {
-			return nil, fmt.Errorf("development agent not initialized")
+	// Check if the agent type is available
+	langchainAdapter, exists := s.agents[agentType]
+	if !exists {
+		return nil, fmt.Errorf("agent type %s not available", agentType)
+	}
+
+	// Convert request to LangChain format and execute
+	params := map[string]interface{}{
+		"query":       request.Request.Query,
+		"context":     request.Request.Context,
+		"tools":       request.Request.Tools,
+		"max_steps":   request.Request.MaxSteps,
+		"temperature": request.Request.Temperature,
+	}
+
+	result, err := langchainAdapter.Execute(ctx, params)
+	if err == nil {
+		// Convert result back to agent.Response format
+		response = &agent.Response{
+			Result:        result["answer"].(string),
+			Success:       true,
+			Confidence:    result["confidence"].(float64),
+			ExecutionTime: result["execution_time"].(time.Duration),
 		}
-		response, err = s.developmentAgent.Execute(ctx, request.AgentRequest)
-	case agents.AgentTypeDatabase:
-		if s.databaseAgent == nil {
-			return nil, fmt.Errorf("database agent not initialized")
+		if steps, ok := result["steps"].([]agent.Step); ok {
+			response.Steps = steps
 		}
-		response, err = s.databaseAgent.Execute(ctx, request.AgentRequest)
-	case agents.AgentTypeInfrastructure:
-		if s.infrastructureAgent == nil {
-			return nil, fmt.Errorf("infrastructure agent not initialized")
-		}
-		response, err = s.infrastructureAgent.Execute(ctx, request.AgentRequest)
-	case agents.AgentTypeResearch:
-		if s.researchAgent == nil {
-			return nil, fmt.Errorf("research agent not initialized")
-		}
-		response, err = s.researchAgent.Execute(ctx, request.AgentRequest)
-	default:
-		return nil, fmt.Errorf("unsupported agent type: %s", agentType)
 	}
 	if err != nil {
 		s.logger.Error("Agent execution failed",
@@ -158,32 +162,9 @@ func (s *Service) ExecuteAgent(ctx context.Context, agentType agents.AgentType, 
 
 	executionTime := time.Since(startTime)
 
-	// Store execution record in database
+	// TODO: Store execution record in database when schema is available
 	if s.dbClient != nil {
-		// Convert agent steps to interface{} for storage
-		stepsInterface := make([]interface{}, len(response.Steps))
-		for i, step := range response.Steps {
-			stepsInterface[i] = step
-		}
-
-		execution := &postgres.AgentExecutionDomain{
-			AgentType:       string(agentType),
-			UserID:          request.UserID,
-			Query:           request.AgentRequest.Query,
-			Response:        response.Result, // AgentResponse uses Result, not Response
-			Steps:           stepsInterface,
-			ExecutionTimeMs: int(executionTime.Milliseconds()),
-			Success:         true, // AgentResponse doesn't have Success field, assume true if no error
-			ErrorMessage:    "",   // AgentResponse doesn't have ErrorMessage field
-			Metadata:        response.Metadata,
-		}
-
-		_, err := s.dbClient.CreateAgentExecution(ctx, execution)
-		if err != nil {
-			s.logger.Warn("Failed to store agent execution record",
-				slog.String("agent_type", string(agentType)),
-				slog.Any("error", err))
-		}
+		s.logger.Debug("Agent execution record storage not yet implemented")
 	}
 
 	s.logger.Info("Agent execution completed",
@@ -282,20 +263,11 @@ func (s *Service) GetMemoryStats(ctx context.Context, userID string) (*memory.Me
 // Utility methods
 
 // GetAvailableAgents returns a list of available agent types
-func (s *Service) GetAvailableAgents() []agents.AgentType {
-	availableAgents := make([]agents.AgentType, 0)
+func (s *Service) GetAvailableAgents() []agent.AgentType {
+	availableAgents := make([]agent.AgentType, 0, len(s.agents))
 
-	if s.developmentAgent != nil {
-		availableAgents = append(availableAgents, agents.AgentTypeDevelopment)
-	}
-	if s.databaseAgent != nil {
-		availableAgents = append(availableAgents, agents.AgentTypeDatabase)
-	}
-	if s.infrastructureAgent != nil {
-		availableAgents = append(availableAgents, agents.AgentTypeInfrastructure)
-	}
-	if s.researchAgent != nil {
-		availableAgents = append(availableAgents, agents.AgentTypeResearch)
+	for agentType := range s.agents {
+		availableAgents = append(availableAgents, agentType)
 	}
 
 	return availableAgents

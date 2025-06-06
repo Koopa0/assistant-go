@@ -12,13 +12,13 @@ import (
 
 	"github.com/koopa0/assistant-go/internal/ai"
 	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/observability"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/platform/observability"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
 )
 
 // Service provides embedding generation and storage capabilities
 type Service struct {
-	aiManager *ai.Manager
+	aiService *ai.Service
 	db        *postgres.Client
 	config    config.Embedding
 	logger    *slog.Logger
@@ -65,9 +65,9 @@ type ContentTypeStats struct {
 }
 
 // NewService creates a new embedding service
-func NewService(aiManager *ai.Manager, db *postgres.Client, cfg config.Embedding, logger *slog.Logger) (*Service, error) {
-	if aiManager == nil {
-		return nil, fmt.Errorf("AI manager is required")
+func NewService(aiService *ai.Service, db *postgres.Client, cfg config.Embedding, logger *slog.Logger) (*Service, error) {
+	if aiService == nil {
+		return nil, fmt.Errorf("AI service is required")
 	}
 	if db == nil {
 		return nil, fmt.Errorf("database client is required")
@@ -83,7 +83,7 @@ func NewService(aiManager *ai.Manager, db *postgres.Client, cfg config.Embedding
 	}
 
 	return &Service{
-		aiManager: aiManager,
+		aiService: aiService,
 		db:        db,
 		config:    cfg,
 		logger:    observability.AILogger(logger, "embeddings", cfg.Model),
@@ -109,7 +109,7 @@ func (s *Service) GenerateEmbedding(ctx context.Context, text string) (*ai.Embed
 		slog.Int("text_length", len(text)))
 
 	// Generate embedding using AI provider
-	response, err := s.aiManager.GenerateEmbedding(ctx, text, s.config.Provider)
+	response, err := s.aiService.GenerateEmbedding(ctx, text, s.config.Provider)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate embedding: %w", err)
 	}

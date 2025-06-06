@@ -1,206 +1,268 @@
+// Package assistant provides domain-specific error handling for assistant operations
+// following CLAUDE.md best practices with proper error hierarchy and context.
 package assistant
 
 import (
-	"errors"
 	"fmt"
+	"time"
+
+	configerrors "github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant-go/internal/errors"
 )
 
-// Error types for the assistant package
-var (
-	// ErrInvalidInput indicates invalid input was provided
-	ErrInvalidInput = errors.New("invalid input")
-
-	// ErrProcessingFailed indicates request processing failed
-	ErrProcessingFailed = errors.New("processing failed")
-
-	// ErrContextNotFound indicates conversation context was not found
-	ErrContextNotFound = errors.New("context not found")
-
-	// ErrProviderUnavailable indicates AI provider is unavailable
-	ErrProviderUnavailable = errors.New("provider unavailable")
-
-	// ErrToolNotFound indicates requested tool was not found
-	ErrToolNotFound = errors.New("tool not found")
-
-	// ErrToolExecutionFailed indicates tool execution failed
-	ErrToolExecutionFailed = errors.New("tool execution failed")
-
-	// ErrRateLimited indicates rate limit was exceeded
-	ErrRateLimited = errors.New("rate limited")
-
-	// ErrUnauthorized indicates unauthorized access
-	ErrUnauthorized = errors.New("unauthorized")
-
-	// ErrTimeout indicates operation timed out
-	ErrTimeout = errors.New("timeout")
-)
-
-// AssistantError represents a domain-specific error
-type AssistantError struct {
-	Code    string
-	Message string
-	Cause   error
-	Context map[string]interface{}
-}
-
-// Error implements the error interface
-func (e *AssistantError) Error() string {
-	if e.Cause != nil {
-		return fmt.Sprintf("%s: %s: %v", e.Code, e.Message, e.Cause)
-	}
-	return fmt.Sprintf("%s: %s", e.Code, e.Message)
-}
-
-// Unwrap returns the underlying error
-func (e *AssistantError) Unwrap() error {
-	return e.Cause
-}
-
-// Is checks if the error matches the target
-func (e *AssistantError) Is(target error) bool {
-	if t, ok := target.(*AssistantError); ok {
-		return e.Code == t.Code
-	}
-	return errors.Is(e.Cause, target)
-}
-
-// NewAssistantError creates a new AssistantError
-func NewAssistantError(code, message string, cause error) *AssistantError {
-	return &AssistantError{
-		Code:    code,
-		Message: message,
-		Cause:   cause,
-		Context: make(map[string]interface{}),
-	}
-}
-
-// WithContext adds context to the error
-func (e *AssistantError) WithContext(key string, value interface{}) *AssistantError {
-	e.Context[key] = value
-	return e
-}
-
-// Error codes
+// Assistant-specific error codes
 const (
-	CodeInvalidInput        = "INVALID_INPUT"
-	CodeProcessingFailed    = "PROCESSING_FAILED"
-	CodeContextNotFound     = "CONTEXT_NOT_FOUND"
-	CodeProviderUnavailable = "PROVIDER_UNAVAILABLE"
-	CodeToolNotFound        = "TOOL_NOT_FOUND"
-	CodeToolExecutionFailed = "TOOL_EXECUTION_FAILED"
-	CodeRateLimited         = "RATE_LIMITED"
-	CodeUnauthorized        = "UNAUTHORIZED"
-	CodeTimeout             = "TIMEOUT"
-	CodeDatabaseError       = "DATABASE_ERROR"
-	CodeConfigurationError  = "CONFIGURATION_ERROR"
-	CodeValidationError     = "VALIDATION_ERROR"
+	// Processing errors
+	CodeAssistantInitialization  = "ASSISTANT_INITIALIZATION"
+	CodeAssistantProcessing      = "ASSISTANT_PROCESSING"
+	CodeAssistantTimeout         = "ASSISTANT_TIMEOUT"
+	CodeAssistantMemoryFull      = "ASSISTANT_MEMORY_FULL"
+	CodeAssistantContextOverflow = "ASSISTANT_CONTEXT_OVERFLOW"
+
+	// Input/Output errors
+	CodeAssistantInvalidInput   = "ASSISTANT_INVALID_INPUT"
+	CodeAssistantEmptyInput     = "ASSISTANT_EMPTY_INPUT"
+	CodeAssistantOutputTooLarge = "ASSISTANT_OUTPUT_TOO_LARGE"
+
+	// Integration errors
+	CodeAssistantProviderError = "ASSISTANT_PROVIDER_ERROR"
+	CodeAssistantToolError     = "ASSISTANT_TOOL_ERROR"
+	CodeAssistantDatabaseError = "ASSISTANT_DATABASE_ERROR"
+	CodeAssistantMemoryError   = "ASSISTANT_MEMORY_ERROR"
+
+	// State errors
+	CodeAssistantStateCorrupted = "ASSISTANT_STATE_CORRUPTED"
+	CodeAssistantStateMismatch  = "ASSISTANT_STATE_MISMATCH"
 )
 
-// Predefined error constructors
-func NewInvalidInputError(message string, cause error) *AssistantError {
-	return NewAssistantError(CodeInvalidInput, message, cause)
+// Processing Error Constructors
+
+// NewAssistantInitializationError creates an initialization error
+func NewAssistantInitializationError(component string, cause error) *errors.AssistantError {
+	return errors.NewInfrastructureError(CodeAssistantInitialization, "assistant initialization failed", cause).
+		WithComponent("assistant").
+		WithContext("failed_component", component).
+		WithUserMessage("Failed to initialize assistant. Please try again.").
+		WithActions("Check configuration", "Verify dependencies", "Restart application").
+		WithSeverity(errors.SeverityHigh)
 }
 
-func NewProcessingFailedError(message string, cause error) *AssistantError {
-	return NewAssistantError(CodeProcessingFailed, message, cause)
+// NewAssistantProcessingError creates a processing error
+func NewAssistantProcessingError(stage string, cause error) *errors.AssistantError {
+	return errors.NewBusinessError(CodeAssistantProcessing, "assistant processing failed", cause).
+		WithComponent("assistant").
+		WithOperation("process").
+		WithContext("stage", stage).
+		WithUserMessage("Failed to process your request. Please try again.").
+		WithActions("Simplify request", "Check input format", "Try alternative approach").
+		WithRetryable(true)
 }
 
-func NewContextNotFoundError(contextID string) *AssistantError {
-	return NewAssistantError(CodeContextNotFound, "conversation context not found", nil).
-		WithContext("context_id", contextID)
+// NewAssistantTimeoutError creates a timeout error
+func NewAssistantTimeoutError(operation string, timeout time.Duration) *errors.AssistantError {
+	return errors.NewInfrastructureError(CodeAssistantTimeout, "assistant operation timed out", nil).
+		WithComponent("assistant").
+		WithOperation(operation).
+		WithContext("timeout", timeout.String()).
+		WithDuration(timeout).
+		WithUserMessage("Request took too long to process. Please try again.").
+		WithActions("Simplify request", "Break into smaller parts", "Check system resources").
+		WithRetryAfter(time.Second * 5)
 }
 
-func NewProviderUnavailableError(provider string, cause error) *AssistantError {
-	return NewAssistantError(CodeProviderUnavailable, "AI provider unavailable", cause).
-		WithContext("provider", provider)
+// NewAssistantMemoryFullError creates a memory full error
+func NewAssistantMemoryFullError(used, limit int64) *errors.AssistantError {
+	return errors.NewInfrastructureError(CodeAssistantMemoryFull, "assistant memory full", nil).
+		WithComponent("assistant").
+		WithOperation("memory_allocation").
+		WithContext("used_bytes", used).
+		WithContext("limit_bytes", limit).
+		WithContext("usage_percent", float64(used)/float64(limit)*100).
+		WithUserMessage("Assistant memory is full. Starting a new session.").
+		WithActions("Start new conversation", "Clear old conversations", "Increase memory limit")
 }
 
-func NewToolNotFoundError(toolName string) *AssistantError {
-	return NewAssistantError(CodeToolNotFound, "tool not found", nil).
-		WithContext("tool", toolName)
+// NewAssistantContextOverflowError creates a context overflow error
+func NewAssistantContextOverflowError(tokens, maxTokens int) *errors.AssistantError {
+	return errors.NewValidationError(CodeAssistantContextOverflow, "context window exceeded", nil).
+		WithComponent("assistant").
+		WithOperation("context_management").
+		WithContext("tokens", tokens).
+		WithContext("max_tokens", maxTokens).
+		WithContext("overflow", tokens-maxTokens).
+		WithUserMessage("Conversation has become too long. Please start a new one.").
+		WithActions("Start new conversation", "Summarize previous context", "Remove old messages")
 }
 
-func NewToolExecutionFailedError(toolName string, cause error) *AssistantError {
-	return NewAssistantError(CodeToolExecutionFailed, "tool execution failed", cause).
-		WithContext("tool", toolName)
+// Input/Output Error Constructors
+
+// NewAssistantInvalidInputError creates an invalid input error
+func NewAssistantInvalidInputError(reason string, input interface{}) *errors.AssistantError {
+	return errors.NewValidationError(CodeAssistantInvalidInput, fmt.Sprintf("invalid input: %s", reason), nil).
+		WithComponent("assistant").
+		WithOperation("validate_input").
+		WithContext("reason", reason).
+		WithContext("input_type", fmt.Sprintf("%T", input)).
+		WithUserMessage(fmt.Sprintf("Invalid input: %s", reason)).
+		WithActions("Check input format", "Review requirements", "Try different input")
 }
 
-func NewRateLimitedError(limit int, window string) *AssistantError {
-	return NewAssistantError(CodeRateLimited, "rate limit exceeded", nil).
-		WithContext("limit", limit).
-		WithContext("window", window)
+// NewAssistantEmptyInputError creates an empty input error
+func NewAssistantEmptyInputError() *errors.AssistantError {
+	return errors.NewValidationError(CodeAssistantEmptyInput, "empty input provided", nil).
+		WithComponent("assistant").
+		WithOperation("validate_input").
+		WithUserMessage("Please provide some input to process.").
+		WithActions("Enter a message", "Ask a question", "Provide a command")
 }
 
-func NewUnauthorizedError(message string) *AssistantError {
-	return NewAssistantError(CodeUnauthorized, message, nil)
+// NewAssistantOutputTooLargeError creates an output too large error
+func NewAssistantOutputTooLargeError(size, maxSize int64) *errors.AssistantError {
+	return errors.NewBusinessError(CodeAssistantOutputTooLarge, "assistant output too large", nil).
+		WithComponent("assistant").
+		WithOperation("generate_output").
+		WithContext("size", size).
+		WithContext("max_size", maxSize).
+		WithContext("excess", size-maxSize).
+		WithUserMessage("Response is too large. Truncating output.").
+		WithActions("Request summary", "Ask for specific parts", "Break into smaller queries")
 }
 
-func NewTimeoutError(operation string, timeout string) *AssistantError {
-	return NewAssistantError(CodeTimeout, "operation timed out", nil).
-		WithContext("operation", operation).
-		WithContext("timeout", timeout)
+// Integration Error Constructors
+
+// NewAssistantProviderError creates a provider integration error
+func NewAssistantProviderError(provider string, cause error) *errors.AssistantError {
+	return errors.NewInfrastructureError(CodeAssistantProviderError, "AI provider error", cause).
+		WithComponent("assistant").
+		WithOperation("provider_call").
+		WithContext("provider", provider).
+		WithUserMessage("AI service temporarily unavailable. Please try again.").
+		WithActions("Retry request", "Try alternative provider", "Check service status").
+		WithRetryAfter(time.Minute)
 }
 
-func NewDatabaseError(operation string, cause error) *AssistantError {
-	return NewAssistantError(CodeDatabaseError, "database operation failed", cause).
-		WithContext("operation", operation)
+// NewAssistantToolError creates a tool integration error
+func NewAssistantToolError(toolName string, cause error) *errors.AssistantError {
+	return errors.NewBusinessError(CodeAssistantToolError, "tool execution error", cause).
+		WithComponent("assistant").
+		WithOperation("tool_execution").
+		WithContext("tool", toolName).
+		WithUserMessage("Tool execution failed. Please try again.").
+		WithActions("Check tool availability", "Verify parameters", "Use alternative tool").
+		WithRetryable(true)
 }
 
-func NewConfigurationError(field string, cause error) *AssistantError {
-	return NewAssistantError(CodeConfigurationError, "configuration error", cause).
-		WithContext("field", field)
+// NewAssistantDatabaseError creates a database integration error
+func NewAssistantDatabaseError(operation string, cause error) *errors.AssistantError {
+	return errors.NewInfrastructureError(CodeAssistantDatabaseError, "database operation failed", cause).
+		WithComponent("assistant").
+		WithOperation(operation).
+		WithUserMessage("Failed to save/load conversation data.").
+		WithActions("Check database connection", "Retry operation", "Contact support").
+		WithRetryable(true)
 }
 
-func NewValidationError(field string, message string) *AssistantError {
-	return NewAssistantError(CodeValidationError, message, nil).
-		WithContext("field", field)
+// NewAssistantMemoryError creates a memory system error
+func NewAssistantMemoryError(operation string, cause error) *errors.AssistantError {
+	return errors.NewBusinessError(CodeAssistantMemoryError, "memory system error", cause).
+		WithComponent("assistant").
+		WithOperation(operation).
+		WithUserMessage("Failed to access conversation memory.").
+		WithActions("Restart conversation", "Clear memory cache", "Check memory service")
 }
 
-// IsAssistantError checks if an error is an AssistantError
+// State Error Constructors
+
+// NewAssistantStateCorruptedError creates a state corrupted error
+func NewAssistantStateCorruptedError(stateID string, cause error) *errors.AssistantError {
+	return errors.NewInfrastructureError(CodeAssistantStateCorrupted, "assistant state corrupted", cause).
+		WithComponent("assistant").
+		WithOperation("load_state").
+		WithContext("state_id", stateID).
+		WithUserMessage("Assistant state is corrupted. Starting fresh.").
+		WithActions("Reset assistant", "Start new session", "Report issue").
+		WithSeverity(errors.SeverityHigh)
+}
+
+// NewAssistantStateMismatchError creates a state mismatch error
+func NewAssistantStateMismatchError(expected, actual string) *errors.AssistantError {
+	return errors.NewBusinessError(CodeAssistantStateMismatch, "assistant state mismatch", nil).
+		WithComponent("assistant").
+		WithOperation("validate_state").
+		WithContext("expected_state", expected).
+		WithContext("actual_state", actual).
+		WithUserMessage("Assistant state mismatch detected.").
+		WithActions("Refresh state", "Restart conversation", "Clear cache")
+}
+
+// Legacy error constructors for backward compatibility
+
+// NewConfigurationError creates a configuration error (deprecated)
+func NewConfigurationError(field string, cause error) error {
+	return configerrors.NewConfigMissingRequiredError(field, "assistant").
+		WithComponent("assistant")
+}
+
+// NewInvalidInputError creates an invalid input error (deprecated)
+func NewInvalidInputError(message string, cause error) error {
+	return NewAssistantInvalidInputError(message, nil)
+}
+
+// NewProcessingFailedError creates a processing failed error (deprecated)
+func NewProcessingFailedError(stage string, cause error) error {
+	return NewAssistantProcessingError(stage, cause)
+}
+
+// NewTimeoutError creates a timeout error (deprecated)
+func NewTimeoutError(operation string, timeout string) error {
+	duration, _ := time.ParseDuration(timeout)
+	return NewAssistantTimeoutError(operation, duration)
+}
+
+// NewToolNotFoundError creates a tool not found error (deprecated)
+func NewToolNotFoundError(toolName string) error {
+	return NewAssistantToolError(toolName, fmt.Errorf("tool not found: %s", toolName))
+}
+
+// NewDatabaseError creates a database error (deprecated)
+func NewDatabaseError(operation string, cause error) error {
+	return NewAssistantDatabaseError(operation, cause)
+}
+
+// Assistant-specific error helpers
+
+// IsAssistantError checks if an error is assistant-related
 func IsAssistantError(err error) bool {
-	var assistantErr *AssistantError
-	return errors.As(err, &assistantErr)
-}
-
-// GetAssistantError extracts an AssistantError from an error chain
-func GetAssistantError(err error) *AssistantError {
-	var assistantErr *AssistantError
-	if errors.As(err, &assistantErr) {
-		return assistantErr
+	if assistantErr := errors.GetAssistantError(err); assistantErr != nil {
+		return assistantErr.Component == "assistant"
 	}
-	return nil
+	return false
 }
 
-// WrapError wraps an error with additional context
-func WrapError(err error, message string) error {
-	if err == nil {
-		return nil
+// IsRetryableAssistantError checks if an assistant error is retryable
+func IsRetryableAssistantError(err error) bool {
+	if assistantErr := errors.GetAssistantError(err); assistantErr != nil {
+		return assistantErr.Retryable && assistantErr.Component == "assistant"
 	}
-	return fmt.Errorf("%s: %w", message, err)
+	return false
 }
 
-// ErrorResponse represents an error response for API endpoints
-type ErrorResponse struct {
-	Code    string                 `json:"code"`
-	Message string                 `json:"message"`
-	Details map[string]interface{} `json:"details,omitempty"`
-}
-
-// ToErrorResponse converts an error to an ErrorResponse
-func ToErrorResponse(err error) *ErrorResponse {
-	if assistantErr := GetAssistantError(err); assistantErr != nil {
-		return &ErrorResponse{
-			Code:    assistantErr.Code,
-			Message: assistantErr.Message,
-			Details: assistantErr.Context,
+// IsMemoryError checks if an error is related to memory constraints
+func IsMemoryError(err error) bool {
+	if assistantErr := errors.GetAssistantError(err); assistantErr != nil {
+		switch assistantErr.Code {
+		case CodeAssistantMemoryFull, CodeAssistantContextOverflow,
+			CodeAssistantMemoryError:
+			return true
 		}
 	}
+	return false
+}
 
-	return &ErrorResponse{
-		Code:    "INTERNAL_ERROR",
-		Message: "An internal error occurred",
-		Details: map[string]interface{}{
-			"error": err.Error(),
-		},
+// GetRetryDelay extracts retry delay from assistant errors
+func GetRetryDelay(err error) *time.Duration {
+	if assistantErr := errors.GetAssistantError(err); assistantErr != nil {
+		return assistantErr.RetryAfter
 	}
+	return nil
 }

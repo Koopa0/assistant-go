@@ -54,7 +54,7 @@ func New(cfg config.CLIConfig, assistant *assistant.Assistant, logger *slog.Logg
 		assistant: assistant,
 		logger:    logger,
 		prompt:    prompt,
-		version:   "0.1.0", // TODO: Get from build flags
+		version:   GetVersion(),
 	}, nil
 }
 
@@ -64,7 +64,8 @@ func (c *CLI) Run(ctx context.Context) error {
 	c.showWelcome()
 
 	// Show help hint
-	ui.Info.Println("Type 'help' for available commands, 'exit' to quit")
+	ui.Info.Println("Type 'help' for available commands, 'menu' for interactive mode, 'exit' to quit")
+	ui.Success.Println("💡 新功能: 輸入 'menu' 進入互動式任務選單!")
 	fmt.Println()
 
 	// Main loop
@@ -173,18 +174,39 @@ func (c *CLI) handleCommand(ctx context.Context, input string) bool {
 		}
 		return true
 
-	// TODO: Implement these commands
+	// New interactive menu command
+	case "menu":
+		return c.showMainMenu(ctx) == nil
+
+	// Workflow guide command
+	case "workflow", "guide":
+		c.showWorkflowGuide()
+		return true
+
+	// Quick access commands
+	case "analyze":
+		return c.analyzeCodeQuality(ctx) == nil
+
+	case "test":
+		return c.generateTests(ctx) == nil
+
+	case "refactor":
+		return c.suggestRefactoring(ctx) == nil
+
+	case "optimize":
+		return c.analyzePerformance(ctx) == nil
+
+	// SQL command shortcuts
 	case "sql", "postgres", "mysql":
-		ui.Warning.Println("SQL commands not yet implemented")
-		return true
+		return c.optimizeSQL(ctx) == nil
 
-	case "k8s", "kubectl":
-		ui.Warning.Println("Kubernetes commands not yet implemented")
-		return true
-
+	// Docker shortcuts
 	case "docker":
-		ui.Warning.Println("Docker commands not yet implemented")
-		return true
+		return c.analyzeDockerfile(ctx) == nil
+
+	// K8s shortcuts
+	case "k8s", "kubectl":
+		return c.checkK8sConfig(ctx) == nil
 
 	case "langchain", "lc":
 		if len(args) == 0 {
@@ -208,7 +230,15 @@ func (c *CLI) handleCommand(ctx context.Context, input string) bool {
 
 // processQuery processes a regular query through the assistant
 func (c *CLI) processQuery(ctx context.Context, query string) {
-	// Show progress indicator
+	// Check if streaming mode is enabled
+	if c.config.EnableStreaming {
+		if err := c.processQueryStream(ctx, query); err != nil {
+			ui.Error.Printf("Error: %v\n", err)
+		}
+		return
+	}
+
+	// Show progress indicator for non-streaming mode
 	stop := ui.ShowProgress("Processing query...")
 
 	// Process the query
@@ -261,27 +291,59 @@ func (c *CLI) showHelp() {
 		desc string
 	}{
 		{"help, ?", "Show this help message"},
+		{"menu", "Show interactive task menu"},
+		{"workflow, guide", "Show workflow guides"},
 		{"exit, quit", "Exit the assistant"},
 		{"clear, cls", "Clear the screen"},
 		{"status", "Show system status"},
 		{"tools", "List available tools"},
 		{"history", "Show command history"},
 		{"theme <dark|light>", "Change color theme"},
-		{"sql <query>", "Execute SQL query"},
-		{"k8s <command>", "Execute Kubernetes command"},
-		{"docker <command>", "Execute Docker command"},
-		{"langchain, lc", "LangChain operations"},
-		{"agents", "List available LangChain agents"},
-		{"chains", "List available LangChain chains"},
 	}
 
+	ui.SubHeader.Println("\n快速命令:")
+	quickCommands := []struct {
+		cmd  string
+		desc string
+	}{
+		{"analyze", "Quick code quality analysis"},
+		{"test", "Generate unit tests"},
+		{"refactor", "Get refactoring suggestions"},
+		{"optimize", "Performance optimization"},
+		{"sql", "SQL query optimization"},
+		{"docker", "Dockerfile analysis"},
+		{"k8s", "Kubernetes config check"},
+	}
+
+	ui.SubHeader.Println("\n基本命令:")
 	for _, cmd := range commands {
 		ui.Label.Printf("  %-20s", cmd.cmd)
 		ui.Muted.Println(cmd.desc)
 	}
 
+	ui.SubHeader.Println("\n快捷命令:")
+	for _, cmd := range quickCommands {
+		ui.Label.Printf("  %-20s", cmd.cmd)
+		ui.Muted.Println(cmd.desc)
+	}
+
+	ui.SubHeader.Println("\nLangChain 功能:")
+	langchainCommands := []struct {
+		cmd  string
+		desc string
+	}{
+		{"langchain, lc", "LangChain operations"},
+		{"agents", "List available LangChain agents"},
+		{"chains", "List available LangChain chains"},
+	}
+
+	for _, cmd := range langchainCommands {
+		ui.Label.Printf("  %-20s", cmd.cmd)
+		ui.Muted.Println(cmd.desc)
+	}
+
 	fmt.Println()
-	ui.Info.Println("Or just type your question and press Enter!")
+	ui.Info.Println("💡 提示: 輸入 'menu' 來使用互動式選單，或直接輸入您的問題！")
 	fmt.Println()
 }
 

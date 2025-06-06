@@ -49,7 +49,15 @@ type CLIConfig struct {
 	HistoryFile    string `yaml:"history_file" env:"CLI_HISTORY_FILE" default:".assistant_history"`
 	MaxHistorySize int    `yaml:"max_history_size" env:"CLI_MAX_HISTORY_SIZE" default:"1000"`
 	EnableColors   bool   `yaml:"enable_colors" env:"CLI_ENABLE_COLORS" default:"true"`
-	PromptTemplate string `yaml:"prompt_template" env:"CLI_PROMPT_TEMPLATE" default:"Assistant> "`
+	PromptTemplate string `yaml:"prompt_template" env:"CLI_PROMPT_TEMPLATE" default:"assistant> "`
+
+	// Streaming configuration
+	EnableStreaming  bool `yaml:"enable_streaming" env:"CLI_ENABLE_STREAMING" default:"true"`
+	StreamBufferSize int  `yaml:"stream_buffer_size" env:"CLI_STREAM_BUFFER_SIZE" default:"1024"`
+
+	// Display options
+	ShowExecutionTime bool `yaml:"show_execution_time" env:"CLI_SHOW_EXECUTION_TIME" default:"true"`
+	ShowTokenUsage    bool `yaml:"show_token_usage" env:"CLI_SHOW_TOKEN_USAGE" default:"true"`
 }
 
 // AIConfig holds AI provider configuration

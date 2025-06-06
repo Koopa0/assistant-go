@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	customerrors "github.com/koopa0/assistant-go/internal/errors"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
 	"github.com/koopa0/assistant-go/internal/testutil"
 )
 
@@ -87,7 +88,7 @@ func TestErrorTypes(t *testing.T) {
 			}
 
 			// For structured errors, check the context instead of the main message
-			if assistantErr := GetAssistantError(err); assistantErr != nil {
+			if assistantErr := customerrors.GetAssistantError(err); assistantErr != nil {
 				found := false
 				for _, value := range assistantErr.Context {
 					if valueStr, ok := value.(string); ok && strings.Contains(valueStr, tt.expectMsg) {

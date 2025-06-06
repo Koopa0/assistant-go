@@ -502,15 +502,15 @@ func TestRegistryStats(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("empty_registry", func(t *testing.T) {
-		stats, err := registry.Stats(ctx)
+		stats, err := registry.StatsLegacy(ctx)
 		if err != nil {
-			t.Errorf("Stats() error = %v, want nil", err)
+			t.Errorf("StatsLegacy() error = %v, want nil", err)
 		}
 		if stats["registered_factories"] != 0 {
-			t.Errorf("Stats() registered_factories = %v, want 0", stats["registered_factories"])
+			t.Errorf("StatsLegacy() registered_factories = %v, want 0", stats["registered_factories"])
 		}
 		if stats["active_instances"] != 0 {
-			t.Errorf("Stats() active_instances = %v, want 0", stats["active_instances"])
+			t.Errorf("StatsLegacy() active_instances = %v, want 0", stats["active_instances"])
 		}
 	})
 
@@ -518,15 +518,15 @@ func TestRegistryStats(t *testing.T) {
 	_ = registry.Register("test_tool", factory)
 
 	t.Run("with_factory", func(t *testing.T) {
-		stats, err := registry.Stats(ctx)
+		stats, err := registry.StatsLegacy(ctx)
 		if err != nil {
-			t.Errorf("Stats() error = %v, want nil", err)
+			t.Errorf("StatsLegacy() error = %v, want nil", err)
 		}
 		if stats["registered_factories"] != 1 {
-			t.Errorf("Stats() registered_factories = %v, want 1", stats["registered_factories"])
+			t.Errorf("StatsLegacy() registered_factories = %v, want 1", stats["registered_factories"])
 		}
 		if stats["active_instances"] != 0 {
-			t.Errorf("Stats() active_instances = %v, want 0", stats["active_instances"])
+			t.Errorf("StatsLegacy() active_instances = %v, want 0", stats["active_instances"])
 		}
 	})
 
@@ -534,15 +534,15 @@ func TestRegistryStats(t *testing.T) {
 	_, _ = registry.GetTool("test_tool", nil)
 
 	t.Run("with_instance", func(t *testing.T) {
-		stats, err := registry.Stats(ctx)
+		stats, err := registry.StatsLegacy(ctx)
 		if err != nil {
-			t.Errorf("Stats() error = %v, want nil", err)
+			t.Errorf("StatsLegacy() error = %v, want nil", err)
 		}
 		if stats["registered_factories"] != 1 {
-			t.Errorf("Stats() registered_factories = %v, want 1", stats["registered_factories"])
+			t.Errorf("StatsLegacy() registered_factories = %v, want 1", stats["registered_factories"])
 		}
 		if stats["active_instances"] != 1 {
-			t.Errorf("Stats() active_instances = %v, want 1", stats["active_instances"])
+			t.Errorf("StatsLegacy() active_instances = %v, want 1", stats["active_instances"])
 		}
 	})
 }

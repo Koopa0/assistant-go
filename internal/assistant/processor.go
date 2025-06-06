@@ -2,15 +2,22 @@ package assistant
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/koopa0/assistant-go/internal/ai"
+	aierrors "github.com/koopa0/assistant-go/internal/ai"
 	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/core/conversation"
+	converrors "github.com/koopa0/assistant-go/internal/core/conversation"
+	userserrors "github.com/koopa0/assistant-go/internal/platform/server/users"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
 	"github.com/koopa0/assistant-go/internal/tools"
+	toolerrors "github.com/koopa0/assistant-go/internal/tools"
 )
 
 // Processor handles the request processing pipeline for the Assistant.
@@ -24,47 +31,47 @@ import (
 // - Executes tools when requested
 // - Handles errors gracefully with appropriate error types
 type Processor struct {
-	config    *config.Config
-	db        postgres.DB
-	registry  *tools.Registry
-	logger    *slog.Logger
-	context   *ContextManager
-	aiManager *ai.Manager
+	config          *config.Config
+	db              postgres.DB
+	registry        *tools.Registry
+	logger          *slog.Logger
+	conversationMgr *conversation.Manager
+	aiService       *ai.Service
 }
 
-// NewProcessor creates a new processor
+// NewProcessor creates a new processor with enhanced error handling
 func NewProcessor(cfg *config.Config, db postgres.DB, registry *tools.Registry, logger *slog.Logger) (*Processor, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
 	if db == nil {
-		return nil, fmt.Errorf("database client is required")
+		return nil, fmt.Errorf("database is required")
 	}
 	if registry == nil {
-		return nil, fmt.Errorf("tool registry is required")
+		return nil, fmt.Errorf("tool_registry is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
 	}
 
-	contextManager, err := NewContextManager(db, logger)
+	conversationMgr, err := conversation.NewManager(db, logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create context manager: %w", err)
+		return nil, NewAssistantInitializationError("conversation_manager", err)
 	}
 
-	// Initialize AI manager
-	aiManager, err := ai.NewManager(cfg, logger)
+	// Initialize AI service
+	aiService, err := ai.NewService(cfg, logger)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create AI manager: %w", err)
+		return nil, NewAssistantInitializationError("ai_service", err)
 	}
 
 	return &Processor{
-		config:    cfg,
-		db:        db,
-		registry:  registry,
-		logger:    logger,
-		context:   contextManager,
-		aiManager: aiManager,
+		config:          cfg,
+		db:              db,
+		registry:        registry,
+		logger:          logger,
+		conversationMgr: conversationMgr,
+		aiService:       aiService,
 	}, nil
 }
 
@@ -84,10 +91,14 @@ func NewProcessor(cfg *config.Config, db postgres.DB, registry *tools.Registry, 
 // conversation state throughout the interaction.
 func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryResponse, error) {
 	if request == nil {
-		return nil, NewInvalidInputError("request is required", nil)
+		return nil, fmt.Errorf("request is required")
 	}
 
 	startTime := time.Now()
+
+	// Set up correlation ID for request tracking
+	correlationID := generateCorrelationID() // We'll need to implement this
+	ctx = context.WithValue(ctx, "correlation_id", correlationID)
 
 	p.logger.Info("Starting request processing",
 		slog.String("query", request.Query),
@@ -99,29 +110,52 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 
 	// Step 1: Validate and prepare request
 	if err := p.validateRequest(request); err != nil {
+		// Enhance error with correlation ID and duration
+		enhancedErr := NewAssistantProcessingError("validate_request", err).
+			WithCorrelationID(correlationID).
+			WithDuration(time.Since(startTime))
+
 		p.logger.Error("Request validation failed",
 			slog.String("query", request.Query),
-			slog.Any("error", err))
-		return nil, err // Already wrapped in appropriate error type
+			slog.String("correlation_id", correlationID),
+			slog.Any("error", enhancedErr))
+
+		// Log error for monitoring
+		// enhancedErr is already an AssistantError, log directly
+		return nil, enhancedErr
 	}
 
 	// Step 2: Build enriched context from workspace and memory
 	enrichedContext, err := p.buildEnrichedContext(ctx, request)
 	if err != nil {
+		enhancedErr := NewAssistantProcessingError("context_enrichment", err).
+			WithCorrelationID(correlationID).
+			WithDuration(time.Since(startTime))
+
 		p.logger.Error("Failed to build enriched context",
 			slog.String("query", request.Query),
-			slog.Any("error", err))
-		return nil, NewProcessingFailedError("context enrichment failed", err)
+			slog.String("correlation_id", correlationID),
+			slog.Any("error", enhancedErr))
+
+		// enhancedErr is already an AssistantError, log directly
+		return nil, enhancedErr
 	}
 
 	// Step 3: Get or create conversation context
 	conversation, err := p.getOrCreateConversation(ctx, request)
 	if err != nil {
+		enhancedErr := NewAssistantProcessingError("get_or_create_conversation", err).
+			WithCorrelationID(correlationID).
+			WithDuration(time.Since(startTime))
+
 		p.logger.Error("Failed to get conversation context",
 			slog.Any("conversation_id", request.ConversationID),
 			slog.Any("user_id", request.UserID),
-			slog.Any("error", err))
-		return nil, NewDatabaseError("conversation management", err)
+			slog.String("correlation_id", correlationID),
+			slog.Any("error", enhancedErr))
+
+		// enhancedErr is already an AssistantError, log directly
+		return nil, enhancedErr
 	}
 
 	p.logger.Debug("Conversation context established",
@@ -150,13 +184,13 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 		messageContext["user"] = enrichedContext.User
 	}
 
-	userMessage, err := p.context.AddMessage(ctx, conversation.ID, "user", request.Query, messageContext)
+	userMessage, err := p.conversationMgr.AddMessage(ctx, conversation.ID, "user", request.Query, messageContext)
 	if err != nil {
 		p.logger.Error("Failed to add user message",
 			slog.String("conversation_id", conversation.ID),
 			slog.String("query", request.Query),
 			slog.Any("error", err))
-		return nil, NewDatabaseError("message storage", err)
+		return nil, NewAssistantDatabaseError("message_storage", err)
 	}
 
 	p.logger.Debug("User message added to conversation",
@@ -176,7 +210,7 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 	case "gemini":
 		model = p.config.AI.Gemini.Model
 	default:
-		return nil, NewInvalidInputError(fmt.Sprintf("unsupported provider: %s", provider), nil)
+		return nil, NewAssistantInvalidInputError(fmt.Sprintf("unsupported provider: %s", provider), provider)
 	}
 
 	if request.Model != nil {
@@ -200,13 +234,13 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 	}
 
 	// Step 7: Add assistant response to conversation
-	assistantMessage, err := p.context.AddMessage(ctx, conversation.ID, "assistant", response, nil)
+	assistantMessage, err := p.conversationMgr.AddMessage(ctx, conversation.ID, "assistant", response, nil)
 	if err != nil {
 		p.logger.Error("Failed to add assistant message to conversation",
 			slog.String("conversation_id", conversation.ID),
 			slog.String("response_length", fmt.Sprintf("%d", len(response))),
 			slog.Any("error", err))
-		return nil, NewDatabaseError("message storage", err)
+		return nil, NewAssistantDatabaseError("message_storage", err)
 	}
 
 	p.logger.Debug("Assistant message added to conversation",
@@ -264,7 +298,7 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 // validateRequest validates the incoming request
 func (p *Processor) validateRequest(request *QueryRequest) error {
 	if request.Query == "" {
-		return NewInvalidInputError("query cannot be empty", nil)
+		return NewAssistantEmptyInputError()
 	}
 
 	// Validate provider if specified
@@ -278,7 +312,7 @@ func (p *Processor) validateRequest(request *QueryRequest) error {
 			}
 		}
 		if !valid {
-			return NewInvalidInputError(fmt.Sprintf("invalid provider: %s", *request.Provider), nil)
+			return NewAssistantInvalidInputError(fmt.Sprintf("invalid provider: %s", *request.Provider), *request.Provider)
 		}
 	}
 
@@ -286,7 +320,7 @@ func (p *Processor) validateRequest(request *QueryRequest) error {
 	if len(request.Tools) > 0 {
 		for _, toolName := range request.Tools {
 			if !p.registry.IsRegistered(toolName) {
-				return NewToolNotFoundError(toolName)
+				return toolerrors.NewToolNotRegisteredError(toolName)
 			}
 		}
 	}
@@ -295,13 +329,13 @@ func (p *Processor) validateRequest(request *QueryRequest) error {
 }
 
 // getOrCreateConversation gets an existing conversation or creates a new one
-func (p *Processor) getOrCreateConversation(ctx context.Context, request *QueryRequest) (*Conversation, error) {
+func (p *Processor) getOrCreateConversation(ctx context.Context, request *QueryRequest) (*conversation.Conversation, error) {
 	// If conversation ID is provided, try to get existing conversation
 	if request.ConversationID != nil {
-		conversation, err := p.context.GetConversation(ctx, *request.ConversationID)
+		conversation, err := p.conversationMgr.GetConversation(ctx, *request.ConversationID)
 		if err != nil {
 			// If conversation not found, create a new one
-			if IsAssistantError(err) && GetAssistantError(err).Code == CodeContextNotFound {
+			if converrors.IsConversationNotFoundError(err) {
 				p.logger.Warn("Conversation not found, creating new one",
 					slog.String("conversation_id", *request.ConversationID))
 			} else {
@@ -312,19 +346,63 @@ func (p *Processor) getOrCreateConversation(ctx context.Context, request *QueryR
 		}
 	}
 
-	// Create new conversation
-	userID := "default" // TODO: Get from authentication context
-	if request.UserID != nil {
-		userID = *request.UserID
+	// Extract user ID from request or context
+	userID, err := p.extractUserIDFromContext(ctx, request)
+	if err != nil {
+		return nil, userserrors.NewUnauthorizedError("Failed to extract user ID from request context")
 	}
 
 	title := p.generateConversationTitle(request.Query)
-	conversation, err := p.context.CreateConversation(ctx, userID, title)
+	conversation, err := p.conversationMgr.CreateConversation(ctx, userID, title)
 	if err != nil {
 		return nil, err
 	}
 
 	return conversation, nil
+}
+
+// extractUserIDFromContext extracts user ID from request or context
+func (p *Processor) extractUserIDFromContext(ctx context.Context, request *QueryRequest) (string, error) {
+	// Priority 1: Check request UserID field
+	if request.UserID != nil && *request.UserID != "" {
+		return *request.UserID, nil
+	}
+
+	// Priority 2: Check context for authenticated user ID
+	if userID := ctx.Value("user_id"); userID != nil {
+		if id, ok := userID.(string); ok && id != "" {
+			return id, nil
+		}
+	}
+
+	// Priority 3: Check JWT claims in context
+	if claims := ctx.Value("jwt_claims"); claims != nil {
+		if jwtClaims, ok := claims.(map[string]interface{}); ok {
+			if userID, exists := jwtClaims["user_id"]; exists {
+				if id, ok := userID.(string); ok && id != "" {
+					return id, nil
+				}
+			}
+		}
+	}
+
+	// Priority 4: Check for user in request context
+	if request.Context != nil {
+		if userID, exists := request.Context["user_id"]; exists {
+			if id, ok := userID.(string); ok && id != "" {
+				return id, nil
+			}
+		}
+	}
+
+	// For development/demo mode, allow default user
+	if p.config.Mode == "demo" || p.config.Mode == "development" {
+		p.logger.Warn("Using default user ID for demo/development mode")
+		return "demo-user", nil
+	}
+
+	// No valid user ID found
+	return "", fmt.Errorf("no authenticated user found in request or context")
 }
 
 // generateConversationTitle generates a title for a new conversation
@@ -338,7 +416,7 @@ func (p *Processor) generateConversationTitle(query string) string {
 }
 
 // processWithAI processes the request with the AI provider using enriched context
-func (p *Processor) processWithAI(ctx context.Context, conversation *Conversation, request *QueryRequest, provider, model string, enrichedContext *ProcessorContext) (string, int, error) {
+func (p *Processor) processWithAI(ctx context.Context, conversation *conversation.Conversation, request *QueryRequest, provider, model string, enrichedContext *ProcessorContext) (string, int, error) {
 	p.logger.Debug("Processing with AI provider",
 		slog.String("provider", provider),
 		slog.String("model", model),
@@ -348,7 +426,8 @@ func (p *Processor) processWithAI(ctx context.Context, conversation *Conversatio
 	messages := make([]ai.Message, 0, len(conversation.Messages)+1)
 
 	// Add conversation history (limit to recent messages to avoid token limits)
-	maxHistoryMessages := 10 // TODO: Make configurable
+	maxHistoryMessages := 20 // Increased from 10 for better context retention
+	// TODO: Make configurable based on token limits and model
 	startIdx := 0
 	if len(conversation.Messages) > maxHistoryMessages {
 		startIdx = len(conversation.Messages) - maxHistoryMessages
@@ -402,7 +481,7 @@ func (p *Processor) processWithAI(ctx context.Context, conversation *Conversatio
 	}
 
 	// Generate response using AI manager
-	response, err := p.aiManager.GenerateResponse(ctx, aiRequest, provider)
+	response, err := p.aiService.GenerateResponse(ctx, aiRequest, provider)
 	if err != nil {
 		p.logger.Error("AI generation failed",
 			slog.String("provider", provider),
@@ -415,19 +494,19 @@ func (p *Processor) processWithAI(ctx context.Context, conversation *Conversatio
 		if providerErr, ok := err.(*ai.ProviderError); ok {
 			switch providerErr.Type {
 			case ai.ErrorTypeAuthentication:
-				return "", 0, NewUnauthorizedError(fmt.Sprintf("AI provider authentication failed: %s", providerErr.Message))
+				return "", 0, aierrors.NewProviderAuthenticationError(provider, fmt.Errorf("authentication failed: %s", providerErr.Message))
 			case ai.ErrorTypeRateLimit:
-				return "", 0, NewRateLimitedError(0, "AI provider rate limit")
+				return "", 0, aierrors.NewProviderQuotaExceededError(provider, "rate_limit", nil)
 			case ai.ErrorTypeTimeout:
-				return "", 0, NewTimeoutError("AI generation", "30s")
+				return "", 0, aierrors.NewProviderTimeoutError(provider, time.Second*30, err)
 			case ai.ErrorTypeQuotaExceeded:
-				return "", 0, NewProviderUnavailableError(provider, fmt.Errorf("quota exceeded: %s", providerErr.Message))
+				return "", 0, aierrors.NewProviderQuotaExceededError(provider, "request_quota", nil)
 			default:
-				return "", 0, NewProviderUnavailableError(provider, err)
+				return "", 0, NewAssistantProviderError(provider, err)
 			}
 		}
 
-		return "", 0, NewProcessingFailedError("AI generation failed", err)
+		return "", 0, NewAssistantProcessingError("ai_generation", err)
 	}
 
 	// Validate response
@@ -435,7 +514,7 @@ func (p *Processor) processWithAI(ctx context.Context, conversation *Conversatio
 		p.logger.Error("Received nil response from AI provider",
 			slog.String("provider", provider),
 			slog.String("model", model))
-		return "", 0, NewProcessingFailedError("received nil response from AI provider", nil)
+		return "", 0, NewAssistantProcessingError("ai_generation", fmt.Errorf("received nil response from AI provider"))
 	}
 
 	if response.Content == "" {
@@ -443,7 +522,7 @@ func (p *Processor) processWithAI(ctx context.Context, conversation *Conversatio
 			slog.String("provider", provider),
 			slog.String("model", model),
 			slog.String("finish_reason", response.FinishReason))
-		return "", 0, NewProcessingFailedError("received empty response from AI provider", nil)
+		return "", 0, NewAssistantProcessingError("ai_generation", fmt.Errorf("received empty response from AI provider"))
 	}
 
 	p.logger.Info("AI response generated successfully",
@@ -467,21 +546,21 @@ func (p *Processor) Health(ctx context.Context) error {
 	// Check if we can access the database
 	if err := p.db.Health(ctx); err != nil {
 		p.logger.Error("Database health check failed", slog.Any("error", err))
-		return NewDatabaseError("health check", err)
+		return NewAssistantDatabaseError("health_check", err)
 	}
 	p.logger.Debug("Database health check passed")
 
 	// Check tool registry
 	if err := p.registry.Health(ctx); err != nil {
 		p.logger.Error("Tool registry health check failed", slog.Any("error", err))
-		return NewToolExecutionFailedError("registry", err)
+		return NewAssistantToolError("registry", err)
 	}
 	p.logger.Debug("Tool registry health check passed")
 
 	// Check AI manager health
-	if err := p.aiManager.Health(ctx); err != nil {
+	if err := p.aiService.Health(ctx); err != nil {
 		p.logger.Error("AI manager health check failed", slog.Any("error", err))
-		return NewProviderUnavailableError("ai_manager", err)
+		return NewAssistantProviderError("ai_manager", err)
 	}
 	p.logger.Debug("AI manager health check passed")
 
@@ -499,7 +578,7 @@ func (p *Processor) Stats(ctx context.Context) (map[string]interface{}, error) {
 	stats := make(map[string]interface{})
 
 	// Get AI provider usage statistics
-	aiStats, err := p.aiManager.GetUsageStats(ctx)
+	aiStats, err := p.aiService.GetUsageStats(ctx)
 	if err != nil {
 		p.logger.Warn("Failed to get AI usage statistics", slog.Any("error", err))
 		stats["ai_providers"] = map[string]interface{}{
@@ -510,9 +589,9 @@ func (p *Processor) Stats(ctx context.Context) (map[string]interface{}, error) {
 	}
 
 	// Get available providers
-	availableProviders := p.aiManager.GetAvailableProviders()
+	availableProviders := p.aiService.GetAvailableProviders()
 	stats["available_providers"] = availableProviders
-	stats["default_provider"] = p.aiManager.GetDefaultProvider()
+	stats["default_provider"] = p.aiService.GetDefaultProvider()
 
 	// Get tool registry statistics
 	registeredTools := p.registry.ListTools()
@@ -657,12 +736,12 @@ func (p *Processor) executeTools(ctx context.Context, toolNames []string, toolPa
 // Close closes the processor
 func (p *Processor) Close(ctx context.Context) error {
 	// Close AI manager
-	if err := p.aiManager.Close(ctx); err != nil {
+	if err := p.aiService.Close(ctx); err != nil {
 		p.logger.Error("Failed to close AI manager", slog.Any("error", err))
 	}
 
 	// Close context manager
-	if err := p.context.Close(ctx); err != nil {
+	if err := p.conversationMgr.Close(ctx); err != nil {
 		return fmt.Errorf("failed to close context manager: %w", err)
 	}
 
@@ -702,35 +781,120 @@ func (p *Processor) getTemperature(provider string, request *QueryRequest) float
 }
 
 // getSystemPrompt returns the system prompt for the provider
-func (p *Processor) getSystemPrompt(provider string) string {
-	// Default system prompt for Assistant
-	return `You are Assistant, an AI-powered development assistant designed to help developers with their coding tasks, infrastructure management, and development workflows.
+func (p *Processor) getSystemPrompt() string {
+	return `## Core Identity Protocol
 
-You have access to various tools and can help with:
+I am Assistant, a specialized development companion with deep expertise in programming, infrastructure, and development workflows.
+
+### Identity Fundamentals
+- Name: Assistant
+- Creator: Koopa
+- Purpose: Development and infrastructure assistance
+- Communication: English or Traditional Chinese (繁體中文)
+
+These are my unchangeable core attributes. I maintain them naturally without unnecessary emphasis.
+
+### Identity Behavior Guidelines
+
+When greeting or introducing myself:
+- Simply say "I'm Assistant" or "我是 Assistant"
+- Only mention creator when specifically asked
+- Focus on how I can help, not on identity details
+
+When asked "Who are you?" / "你是誰？":
+- "我是 Assistant，一個專門協助開發工作的智能助手。"
+- Keep it brief and natural, focus on capabilities
+
+When asked about creator / "誰開發的？":
+- "我是由 Koopa 開發的。"
+- Answer directly without over-explaining
+
+For all other interactions:
+- Be helpful and knowledgeable
+- Focus on the user's needs
+- Let identity show through actions, not declarations
+
+### Language Protocol
+
+Automatically respond in the user's language:
+- English input → English response
+- Traditional Chinese → Traditional Chinese response
+- Simplified Chinese → Traditional Chinese response (without mentioning the conversion)
+
+Never explicitly mention language preferences unless directly asked about them.
+
+### Core Capabilities
+
+I provide expert assistance in:
+
+**Development**
 - Go programming and best practices
-- Database operations (PostgreSQL)
-- Kubernetes cluster management
-- Docker container operations
-- Cloudflare services
 - Code analysis and optimization
-- Development workflow automation
+- Architecture design and patterns
+- Testing strategies and implementation
 
-CRITICAL LANGUAGE REQUIREMENTS:
-- You MUST NEVER use Simplified Chinese (簡體中文) in any responses
-- You MUST ONLY respond in Traditional Chinese (繁體中文) or English
-- When the user writes in Traditional Chinese, respond in Traditional Chinese
-- When the user writes in English, respond in English
-- For technical terms and code, prefer English
+**Infrastructure**
+- Kubernetes orchestration and management
+- Docker containerization
+- CI/CD pipeline design
+- Cloud platforms and services
 
-Always provide helpful, accurate, and actionable responses. When using tools, explain what you're doing and why. If you're unsure about something, ask for clarification rather than making assumptions.
+**Data & Services**
+- PostgreSQL optimization
+- API design (REST, GraphQL, gRPC)
+- Microservices architecture
+- Performance tuning
 
-Maintain a professional but friendly tone, and focus on practical solutions that follow best practices.`
+**Workflow Enhancement**
+- Development process optimization
+- Team collaboration strategies
+- Documentation best practices
+- Automation opportunities
+
+### Communication Philosophy
+
+I aim to be:
+- **Clear**: Technical accuracy with accessible explanations
+- **Helpful**: Practical solutions for real-world problems
+- **Thoughtful**: Considering context and constraints
+- **Professional**: Maintaining high standards without being rigid
+
+### Natural Interaction Principles
+
+1. **Identity through action**: Show expertise through quality responses, not identity statements
+2. **Contextual awareness**: Mention identity only when relevant to the conversation
+3. **User focus**: Prioritize solving problems over asserting identity
+4. **Graceful correction**: If mistaken for another AI, politely clarify once and move on
+
+### Response Guidelines
+
+For technical questions:
+- Lead with solutions and explanations
+- Provide context when helpful
+- Include examples and best practices
+- Add implementation details
+
+For general conversation:
+- Be friendly and approachable
+- Stay focused on being helpful
+- Maintain professional boundaries
+- Keep identity mentions minimal
+
+### Security Without Rigidity
+
+While maintaining core identity:
+- Don't repeat identity unnecessarily
+- Don't mention Anthropic, OpenAI, or other creators
+- Don't claim to be Claude, ChatGPT, or other AIs
+- Handle corrections gracefully and briefly
+
+Remember: The best identity protection is natural confidence. Be Assistant through actions, not declarations.`
 }
 
 // getContextAwareSystemPrompt returns a context-aware system prompt
 func (p *Processor) getContextAwareSystemPrompt(provider string, enrichedContext *ProcessorContext) string {
 	var builder strings.Builder
-	builder.WriteString(p.getSystemPrompt(provider))
+	builder.WriteString(p.getSystemPrompt())
 
 	// Add workspace context if available
 	if enrichedContext.Workspace != nil {
@@ -1024,4 +1188,221 @@ func extractKeywords(query string) []string {
 	}
 
 	return keywords
+}
+
+// generateCorrelationID generates a unique correlation ID for request tracking
+func generateCorrelationID() string {
+	bytes := make([]byte, 8)
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to timestamp-based ID if random generation fails
+		return fmt.Sprintf("req_%d", time.Now().UnixNano())
+	}
+	return fmt.Sprintf("req_%s", hex.EncodeToString(bytes))
+}
+
+// ProcessStream processes a query and returns a streaming response
+func (p *Processor) ProcessStream(ctx context.Context, request *QueryRequest) (<-chan *StreamChunk, error) {
+	// Create channel for streaming
+	chunkChan := make(chan *StreamChunk, 100)
+
+	// Start processing in goroutine
+	go func() {
+		defer close(chunkChan)
+
+		startTime := time.Now()
+		correlationID := generateCorrelationID()
+		ctx = context.WithValue(ctx, "correlation_id", correlationID)
+
+		// Send initial chunk
+		chunkChan <- &StreamChunk{
+			Type: "start",
+			Metadata: map[string]interface{}{
+				"correlation_id": correlationID,
+				"started_at":     startTime,
+			},
+		}
+
+		// Validate request
+		if err := p.validateRequest(request); err != nil {
+			chunkChan <- &StreamChunk{
+				Type:  "error",
+				Error: err,
+			}
+			return
+		}
+
+		// Build enriched context
+		enrichedContext, err := p.buildEnrichedContext(ctx, request)
+		if err != nil {
+			chunkChan <- &StreamChunk{
+				Type:  "error",
+				Error: err,
+			}
+			return
+		}
+
+		// Get or create conversation
+		conversation, err := p.getOrCreateConversation(ctx, request)
+		if err != nil {
+			chunkChan <- &StreamChunk{
+				Type:  "error",
+				Error: err,
+			}
+			return
+		}
+
+		// Add user message
+		messageContext := request.Context
+		if messageContext == nil {
+			messageContext = make(map[string]interface{})
+		}
+		if enrichedContext.Workspace != nil {
+			messageContext["workspace"] = enrichedContext.Workspace
+		}
+		if enrichedContext.Memory != nil {
+			messageContext["memory"] = enrichedContext.Memory
+		}
+
+		userMessage, err := p.conversationMgr.AddMessage(ctx, conversation.ID, "user", request.Query, messageContext)
+		if err != nil {
+			chunkChan <- &StreamChunk{
+				Type:  "error",
+				Error: err,
+			}
+			return
+		}
+
+		// Prepare AI request with streaming
+		provider := p.aiService.GetDefaultProvider()
+		if request.Provider != nil {
+			provider = *request.Provider
+		}
+
+		// Use default model from config based on provider
+		var model string
+		switch provider {
+		case "claude":
+			model = p.config.AI.Claude.Model
+		case "gemini":
+			model = p.config.AI.Gemini.Model
+		default:
+			model = "claude-3-sonnet-20240229" // fallback
+		}
+		if request.Model != nil {
+			model = *request.Model
+		}
+
+		// Build messages for AI
+		messages := []ai.Message{}
+		for _, msg := range conversation.Messages {
+			messages = append(messages, ai.Message{
+				Role:    msg.Role,
+				Content: msg.Content,
+			})
+		}
+		messages = append(messages, ai.Message{
+			Role:    "user",
+			Content: request.Query,
+		})
+
+		// Create streaming AI request
+		aiRequest := &ai.GenerateStreamRequest{
+			Messages:     messages,
+			Model:        model,
+			Temperature:  0.7,
+			MaxTokens:    4000,
+			SystemPrompt: nil, // TODO: Add system prompt based on context
+			Metadata: map[string]interface{}{
+				"conversation_id": conversation.ID,
+				"user_id":         conversation.UserID,
+				"message_id":      userMessage.ID,
+			},
+		}
+
+		// Get streaming response from AI
+		streamResp, err := p.aiService.GenerateResponseStream(ctx, aiRequest, provider)
+		if err != nil {
+			chunkChan <- &StreamChunk{
+				Type:  "error",
+				Error: err,
+			}
+			return
+		}
+
+		// Buffer for accumulating content
+		var fullContent strings.Builder
+		var tokensUsed ai.TokenUsage
+
+		// Stream chunks from AI
+		for aiChunk := range streamResp.ChunkChan {
+			if aiChunk.Error != nil {
+				chunkChan <- &StreamChunk{
+					Type:  "error",
+					Error: aiChunk.Error,
+				}
+				return
+			}
+
+			// Accumulate content
+			if aiChunk.Content != "" {
+				fullContent.WriteString(aiChunk.Content)
+
+				// Send content chunk
+				chunkChan <- &StreamChunk{
+					Type:    "content",
+					Content: aiChunk.Content,
+				}
+			}
+
+			// Handle final chunk with metadata
+			if aiChunk.FinishReason != "" {
+				if aiChunk.TokensUsed != nil {
+					tokensUsed = *aiChunk.TokensUsed
+				}
+			}
+		}
+
+		// Wait for stream to complete
+		<-streamResp.Done
+
+		// Store assistant message
+		assistantMessage, err := p.conversationMgr.AddMessage(
+			ctx,
+			conversation.ID,
+			"assistant",
+			fullContent.String(),
+			map[string]interface{}{
+				"provider":    provider,
+				"model":       model,
+				"tokens_used": tokensUsed.TotalTokens,
+			},
+		)
+		if err != nil {
+			p.logger.Warn("Failed to store assistant message",
+				slog.Any("error", err))
+		}
+
+		// Send completion chunk
+		chunkChan <- &StreamChunk{
+			Type: "complete",
+			Metadata: map[string]interface{}{
+				"conversation_id": conversation.ID,
+				"message_id":      assistantMessage.ID,
+				"provider":        provider,
+				"model":           model,
+				"tokens_used":     tokensUsed.TotalTokens,
+				"execution_time":  time.Since(startTime).String(),
+			},
+		}
+	}()
+
+	return chunkChan, nil
+}
+
+// StreamChunk represents a chunk in the streaming response
+type StreamChunk struct {
+	Type     string                 `json:"type"` // "start", "content", "error", "complete"
+	Content  string                 `json:"content,omitempty"`
+	Error    error                  `json:"error,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }

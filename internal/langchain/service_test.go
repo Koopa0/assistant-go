@@ -7,7 +7,7 @@ import (
 	"github.com/tmc/langchaingo/llms"
 
 	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/langchain/agents"
+	"github.com/koopa0/assistant-go/internal/core/agent"
 	"github.com/koopa0/assistant-go/internal/langchain/chains"
 	"github.com/koopa0/assistant-go/internal/testutil"
 )
@@ -137,17 +137,17 @@ func TestServiceExecuteAgent(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	request := &agents.AgentRequest{
+	request := &agent.Request{
 		Query:    "test query",
 		MaxSteps: 3,
 		Context:  map[string]interface{}{"test": "context"},
 	}
 
 	agentExecRequest := &AgentExecutionRequest{
-		UserID:       "test-user",
-		AgentRequest: request,
+		UserID:  "test-user",
+		Request: request,
 	}
-	response, err := service.ExecuteAgent(ctx, agents.AgentTypeDevelopment, agentExecRequest)
+	response, err := service.ExecuteAgent(ctx, agent.TypeDevelopment, agentExecRequest)
 	if err != nil {
 		t.Fatalf("Failed to execute agent: %v", err)
 	}

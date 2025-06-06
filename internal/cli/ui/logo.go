@@ -46,8 +46,3 @@ func WelcomeMessage(version string) string {
 
 	return fmt.Sprintf("\n%s\n%s\n", title, ver)
 }
-
-// Divider returns a colored divider line
-func Divider() string {
-	return color.New(color.FgHiBlack).Sprint(strings.Repeat("─", 60))
-}

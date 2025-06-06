@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
 )
 
 // MemoryType represents different types of memory

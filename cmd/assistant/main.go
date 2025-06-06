@@ -15,14 +15,13 @@ import (
 	"github.com/koopa0/assistant-go/internal/assistant"
 	"github.com/koopa0/assistant-go/internal/cli"
 	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/observability"
-	"github.com/koopa0/assistant-go/internal/server"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/platform/observability"
+	"github.com/koopa0/assistant-go/internal/platform/server"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
 )
 
 const (
-	appName    = "Assistant"
-	appVersion = "0.1.0"
+	appName = "Assistant"
 )
 
 func main() {
@@ -34,7 +33,7 @@ func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "version":
-			fmt.Printf("%s %s\n", appName, appVersion)
+			cli.PrintVersion(appName)
 			return
 		case "help", "-h", "--help":
 			printUsage()
@@ -91,7 +90,7 @@ func main() {
 	// Only log startup info for server mode
 	if !isQuietMode {
 		logger.Info("Starting Assistant",
-			slog.String("version", appVersion),
+			slog.String("version", cli.GetVersion()),
 			slog.String("mode", cfg.Mode))
 	}
 
@@ -247,13 +246,35 @@ func runCLI(ctx context.Context, cfg *config.Config, assistant *assistant.Assist
 }
 
 func runDirectQuery(ctx context.Context, assistant *assistant.Assistant, query string, logger *slog.Logger) {
-	response, err := assistant.ProcessQuery(ctx, query)
+	// Use streaming for direct queries
+	streamResp, err := assistant.ProcessQueryStream(ctx, query)
 	if err != nil {
 		logger.Error("Query processing failed", slog.Any("error", err))
 		os.Exit(1)
 	}
 
-	fmt.Println(response)
+	// Process the stream
+	for {
+		select {
+		case text, ok := <-streamResp.TextChan:
+			if !ok {
+				fmt.Println() // Final newline
+				return
+			}
+			fmt.Print(text)
+
+		case <-streamResp.EventChan:
+			// Ignore events for simple output
+
+		case err := <-streamResp.ErrorChan:
+			logger.Error("Streaming error", slog.Any("error", err))
+			os.Exit(1)
+
+		case <-streamResp.Done:
+			fmt.Println() // Final newline
+			return
+		}
+	}
 }
 
 func runMigrate(ctx context.Context, cfg *config.Config, logger *slog.Logger, command string) {
@@ -329,5 +350,5 @@ Examples:
   %s ask "Explain Go's memory model" # Ask direct question
 
 For more information, visit: https://github.com/koopa0/assistant
-`, appName, appVersion, os.Args[0], os.Args[0], os.Args[0], os.Args[0])
+`, appName, cli.GetVersion(), os.Args[0], os.Args[0], os.Args[0], os.Args[0])
 }

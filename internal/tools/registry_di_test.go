@@ -100,8 +100,7 @@ func (r *DIRegistry) Execute(ctx context.Context, toolName string, input *ToolIn
 		}, err
 	}
 
-	toolInput := &ToolInput{Parameters: input}
-	result, err := tool.Execute(ctx, toolInput)
+	result, err := tool.Execute(ctx, input)
 	duration := time.Since(start)
 
 	if err != nil {
@@ -308,7 +307,7 @@ func TestDIRegistry_DependencyInjection(t *testing.T) {
 		registry := NewDIRegistry(tools, factories, logger)
 
 		// Test with failing factory
-		failingFactory := func(config map[string]interface{}, logger Logger) (Tool, error) {
+		failingFactory := func(config *ToolConfig, logger Logger) (Tool, error) {
 			return nil, errors.New("factory creation failed")
 		}
 

@@ -6,13 +6,18 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/koopa0/assistant-go/internal/ai/claude"
+	"github.com/koopa0/assistant-go/internal/ai/gemini"
+	"github.com/koopa0/assistant-go/internal/ai/prompts"
 	"github.com/koopa0/assistant-go/internal/config"
 )
 
 // Service provides a unified AI service using direct dependencies
-// Replaces the Factory/Manager anti-pattern with simple composition
+// Uses concrete clients instead of interfaces for simplicity
 type Service struct {
-	providers       map[string]Provider
+	claudeClient    *claude.Client
+	geminiClient    *gemini.Client
+	promptService   *prompts.PromptService
 	defaultProvider string
 	logger          *slog.Logger
 }
@@ -28,18 +33,14 @@ func NewService(cfg *config.Config, logger *slog.Logger) (*Service, error) {
 	}
 
 	svc := &Service{
-		providers:       make(map[string]Provider),
 		defaultProvider: cfg.AI.DefaultProvider,
 		logger:          logger,
+		promptService:   prompts.NewPromptService(logger),
 	}
-
-	// Initialize providers using the existing factory
-	factory := NewFactory(logger)
-	RegisterProviders(factory)
 
 	// Initialize Claude if configured
 	if cfg.AI.Claude.APIKey != "" {
-		claudeConfig := ProviderConfig{
+		claudeConfig := claude.ProviderConfig{
 			APIKey:      cfg.AI.Claude.APIKey,
 			BaseURL:     cfg.AI.Claude.BaseURL,
 			Model:       cfg.AI.Claude.Model,
@@ -48,17 +49,17 @@ func NewService(cfg *config.Config, logger *slog.Logger) (*Service, error) {
 			Timeout:     30 * time.Second,
 		}
 
-		claudeProvider, err := factory.CreateProvider("claude", claudeConfig)
+		claudeClient, err := claude.NewClient(claudeConfig, logger)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create Claude provider: %w", err)
+			return nil, fmt.Errorf("failed to create Claude client: %w", err)
 		}
-		svc.providers["claude"] = claudeProvider
-		logger.Info("Claude provider initialized")
+		svc.claudeClient = claudeClient
+		logger.Info("Claude client initialized")
 	}
 
 	// Initialize Gemini if configured
 	if cfg.AI.Gemini.APIKey != "" {
-		geminiConfig := ProviderConfig{
+		geminiConfig := gemini.ProviderConfig{
 			APIKey:      cfg.AI.Gemini.APIKey,
 			BaseURL:     cfg.AI.Gemini.BaseURL,
 			Model:       cfg.AI.Gemini.Model,
@@ -67,16 +68,16 @@ func NewService(cfg *config.Config, logger *slog.Logger) (*Service, error) {
 			Timeout:     30 * time.Second,
 		}
 
-		geminiProvider, err := factory.CreateProvider("gemini", geminiConfig)
+		geminiClient, err := gemini.NewClient(geminiConfig, logger)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create Gemini provider: %w", err)
+			return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 		}
-		svc.providers["gemini"] = geminiProvider
-		logger.Info("Gemini provider initialized")
+		svc.geminiClient = geminiClient
+		logger.Info("Gemini client initialized")
 	}
 
 	// Validate at least one provider is available
-	if len(svc.providers) == 0 {
+	if svc.claudeClient == nil && svc.geminiClient == nil {
 		return nil, fmt.Errorf("no AI providers configured")
 	}
 
@@ -87,7 +88,7 @@ func NewService(cfg *config.Config, logger *slog.Logger) (*Service, error) {
 
 	logger.Info("AI service initialized",
 		slog.String("default_provider", svc.defaultProvider),
-		slog.Int("provider_count", len(svc.providers)),
+		slog.Int("provider_count", svc.getProviderCount()),
 		slog.Any("available_providers", svc.GetAvailableProviders()))
 
 	return svc, nil
@@ -100,12 +101,46 @@ func (s *Service) GenerateResponse(ctx context.Context, request *GenerateRequest
 		provider = providerName[0]
 	}
 
-	providerInstance, exists := s.providers[provider]
-	if !exists {
-		return nil, fmt.Errorf("provider %s not available", provider)
+	switch provider {
+	case "claude":
+		if s.claudeClient == nil {
+			return nil, fmt.Errorf("Claude provider not available")
+		}
+		// Convert ai.GenerateRequest to claude.GenerateRequest
+		claudeReq := &claude.GenerateRequest{
+			Messages:     convertMessagesToClaude(request.Messages),
+			MaxTokens:    request.MaxTokens,
+			Temperature:  request.Temperature,
+			Model:        request.Model,
+			SystemPrompt: request.SystemPrompt,
+			Metadata:     request.Metadata,
+		}
+		resp, err := s.claudeClient.GenerateResponse(ctx, claudeReq)
+		if err != nil {
+			return nil, err
+		}
+		return convertClaudeResponse(resp), nil
+	case "gemini":
+		if s.geminiClient == nil {
+			return nil, fmt.Errorf("Gemini provider not available")
+		}
+		// Convert ai.GenerateRequest to gemini.GenerateRequest
+		geminiReq := &gemini.GenerateRequest{
+			Messages:     convertMessagesToGemini(request.Messages),
+			MaxTokens:    request.MaxTokens,
+			Temperature:  request.Temperature,
+			Model:        request.Model,
+			SystemPrompt: request.SystemPrompt,
+			Metadata:     request.Metadata,
+		}
+		resp, err := s.geminiClient.GenerateResponse(ctx, geminiReq)
+		if err != nil {
+			return nil, err
+		}
+		return convertGeminiResponse(resp), nil
+	default:
+		return nil, fmt.Errorf("unknown provider: %s", provider)
 	}
-
-	return providerInstance.GenerateResponse(ctx, request)
 }
 
 // GenerateEmbedding generates embeddings using the specified or default provider
@@ -115,19 +150,38 @@ func (s *Service) GenerateEmbedding(ctx context.Context, text string, providerNa
 		provider = providerName[0]
 	}
 
-	providerInstance, exists := s.providers[provider]
-	if !exists {
-		return nil, fmt.Errorf("provider %s not available", provider)
+	switch provider {
+	case "claude":
+		if s.claudeClient == nil {
+			return nil, fmt.Errorf("Claude provider not available")
+		}
+		resp, err := s.claudeClient.GenerateEmbedding(ctx, text)
+		if err != nil {
+			return nil, err
+		}
+		return convertClaudeEmbeddingResponse(resp), nil
+	case "gemini":
+		if s.geminiClient == nil {
+			return nil, fmt.Errorf("Gemini provider not available")
+		}
+		resp, err := s.geminiClient.GenerateEmbedding(ctx, text)
+		if err != nil {
+			return nil, err
+		}
+		return convertGeminiEmbeddingResponse(resp), nil
+	default:
+		return nil, fmt.Errorf("unknown provider: %s", provider)
 	}
-
-	return providerInstance.GenerateEmbedding(ctx, text)
 }
 
 // GetAvailableProviders returns a list of available providers
 func (s *Service) GetAvailableProviders() []string {
 	var providers []string
-	for name := range s.providers {
-		providers = append(providers, name)
+	if s.claudeClient != nil {
+		providers = append(providers, "claude")
+	}
+	if s.geminiClient != nil {
+		providers = append(providers, "gemini")
 	}
 	return providers
 }
@@ -150,9 +204,14 @@ func (s *Service) SetDefaultProvider(name string) error {
 
 // Health checks the health of all available providers
 func (s *Service) Health(ctx context.Context) error {
-	for name, provider := range s.providers {
-		if err := provider.Health(ctx); err != nil {
-			return fmt.Errorf("%s health check failed: %w", name, err)
+	if s.claudeClient != nil {
+		if err := s.claudeClient.Health(ctx); err != nil {
+			return fmt.Errorf("Claude health check failed: %w", err)
+		}
+	}
+	if s.geminiClient != nil {
+		if err := s.geminiClient.Health(ctx); err != nil {
+			return fmt.Errorf("Gemini health check failed: %w", err)
 		}
 	}
 	return nil
@@ -162,15 +221,24 @@ func (s *Service) Health(ctx context.Context) error {
 func (s *Service) GetUsageStats(ctx context.Context) (map[string]*UsageStats, error) {
 	stats := make(map[string]*UsageStats)
 
-	for name, provider := range s.providers {
-		providerStats, err := provider.GetUsage(ctx)
+	if s.claudeClient != nil {
+		providerStats, err := s.claudeClient.GetUsage(ctx)
 		if err != nil {
-			s.logger.Warn("Failed to get usage stats for provider",
-				slog.String("provider", name),
+			s.logger.Warn("Failed to get usage stats for Claude",
 				slog.Any("error", err))
-			continue
+		} else {
+			stats["claude"] = convertClaudeUsageStats(providerStats)
 		}
-		stats[name] = providerStats
+	}
+
+	if s.geminiClient != nil {
+		providerStats, err := s.geminiClient.GetUsage(ctx)
+		if err != nil {
+			s.logger.Warn("Failed to get usage stats for Gemini",
+				slog.Any("error", err))
+		} else {
+			stats["gemini"] = convertGeminiUsageStats(providerStats)
+		}
 	}
 
 	return stats, nil
@@ -180,10 +248,17 @@ func (s *Service) GetUsageStats(ctx context.Context) (map[string]*UsageStats, er
 func (s *Service) Close(ctx context.Context) error {
 	var lastErr error
 
-	for name, provider := range s.providers {
-		if err := provider.Close(ctx); err != nil {
-			s.logger.Error("Failed to close provider",
-				slog.String("provider", name),
+	if s.claudeClient != nil {
+		if err := s.claudeClient.Close(ctx); err != nil {
+			s.logger.Error("Failed to close Claude client",
+				slog.Any("error", err))
+			lastErr = err
+		}
+	}
+
+	if s.geminiClient != nil {
+		if err := s.geminiClient.Close(ctx); err != nil {
+			s.logger.Error("Failed to close Gemini client",
 				slog.Any("error", err))
 			lastErr = err
 		}
@@ -195,6 +270,191 @@ func (s *Service) Close(ctx context.Context) error {
 // Private helper methods
 
 func (s *Service) isProviderAvailable(provider string) bool {
-	_, exists := s.providers[provider]
-	return exists
+	switch provider {
+	case "claude":
+		return s.claudeClient != nil
+	case "gemini":
+		return s.geminiClient != nil
+	default:
+		return false
+	}
+}
+
+func (s *Service) getProviderCount() int {
+	count := 0
+	if s.claudeClient != nil {
+		count++
+	}
+	if s.geminiClient != nil {
+		count++
+	}
+	return count
+}
+
+// Conversion functions
+
+func convertMessagesToClaude(messages []Message) []claude.Message {
+	claudeMessages := make([]claude.Message, len(messages))
+	for i, msg := range messages {
+		claudeMessages[i] = claude.Message{
+			Role:    msg.Role,
+			Content: msg.Content,
+		}
+	}
+	return claudeMessages
+}
+
+func convertMessagesToGemini(messages []Message) []gemini.Message {
+	geminiMessages := make([]gemini.Message, len(messages))
+	for i, msg := range messages {
+		geminiMessages[i] = gemini.Message{
+			Role:    msg.Role,
+			Content: msg.Content,
+		}
+	}
+	return geminiMessages
+}
+
+func convertClaudeResponse(resp *claude.GenerateResponse) *GenerateResponse {
+	return &GenerateResponse{
+		Content:      resp.Content,
+		Model:        resp.Model,
+		Provider:     resp.Provider,
+		TokensUsed:   TokenUsage(resp.TokensUsed),
+		FinishReason: resp.FinishReason,
+		ResponseTime: resp.ResponseTime,
+		RequestID:    resp.RequestID,
+		Metadata:     resp.Metadata,
+	}
+}
+
+func convertGeminiResponse(resp *gemini.GenerateResponse) *GenerateResponse {
+	return &GenerateResponse{
+		Content:      resp.Content,
+		Model:        resp.Model,
+		Provider:     resp.Provider,
+		TokensUsed:   TokenUsage(resp.TokensUsed),
+		FinishReason: resp.FinishReason,
+		ResponseTime: resp.ResponseTime,
+		RequestID:    resp.RequestID,
+		Metadata:     resp.Metadata,
+	}
+}
+
+func convertClaudeEmbeddingResponse(resp *claude.EmbeddingResponse) *EmbeddingResponse {
+	return &EmbeddingResponse{
+		Embedding:    resp.Embedding,
+		Model:        resp.Model,
+		Provider:     resp.Provider,
+		TokensUsed:   resp.TokensUsed,
+		ResponseTime: resp.ResponseTime,
+		RequestID:    resp.RequestID,
+	}
+}
+
+func convertGeminiEmbeddingResponse(resp *gemini.EmbeddingResponse) *EmbeddingResponse {
+	return &EmbeddingResponse{
+		Embedding:    resp.Embedding,
+		Model:        resp.Model,
+		Provider:     resp.Provider,
+		TokensUsed:   resp.TokensUsed,
+		ResponseTime: resp.ResponseTime,
+		RequestID:    resp.RequestID,
+	}
+}
+
+func convertClaudeUsageStats(stats *claude.UsageStats) *UsageStats {
+	return &UsageStats{
+		TotalRequests:   stats.TotalRequests,
+		TotalTokens:     stats.TotalTokens,
+		InputTokens:     stats.InputTokens,
+		OutputTokens:    stats.OutputTokens,
+		TotalCost:       stats.TotalCost,
+		AverageLatency:  stats.AverageLatency,
+		ErrorRate:       stats.ErrorRate,
+		LastRequestTime: stats.LastRequestTime,
+		RequestsPerHour: stats.RequestsPerHour,
+	}
+}
+
+func convertGeminiUsageStats(stats *gemini.UsageStats) *UsageStats {
+	return &UsageStats{
+		TotalRequests:   stats.TotalRequests,
+		TotalTokens:     stats.TotalTokens,
+		InputTokens:     stats.InputTokens,
+		OutputTokens:    stats.OutputTokens,
+		TotalCost:       stats.TotalCost,
+		AverageLatency:  stats.AverageLatency,
+		ErrorRate:       stats.ErrorRate,
+		LastRequestTime: stats.LastRequestTime,
+		RequestsPerHour: stats.RequestsPerHour,
+	}
+}
+
+// ProcessEnhancedQuery processes a user query with intelligent prompt enhancement
+func (s *Service) ProcessEnhancedQuery(ctx context.Context, userQuery string, promptCtx *prompts.PromptContext, providerName ...string) (*EnhancedQueryResponse, error) {
+	// Enhance the query with intelligent prompts
+	enhanced, err := s.promptService.EnhanceQuery(ctx, userQuery, promptCtx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to enhance query: %w", err)
+	}
+
+	s.logger.Info("Processing enhanced query",
+		"original_query", userQuery,
+		"task_type", enhanced.TaskType,
+		"confidence", enhanced.Confidence,
+		"template", enhanced.PromptTemplate)
+
+	// Create AI request with enhanced prompt
+	request := &GenerateRequest{
+		Messages: []Message{
+			{
+				Role:    "user",
+				Content: enhanced.EnhancedQuery,
+			},
+		},
+		SystemPrompt: &enhanced.SystemPrompt,
+		Temperature:  0.1, // Lower temperature for more consistent technical responses
+		MaxTokens:    4000,
+		Metadata: map[string]interface{}{
+			"task_type":       enhanced.TaskType,
+			"confidence":      enhanced.Confidence,
+			"prompt_template": enhanced.PromptTemplate,
+			"module_path":     promptCtx.ModulePath,
+			"project_type":    promptCtx.ProjectType,
+		},
+	}
+
+	// Generate response using AI service
+	response, err := s.GenerateResponse(ctx, request, providerName...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate AI response: %w", err)
+	}
+
+	// Return enhanced response
+	return &EnhancedQueryResponse{
+		OriginalQuery:  userQuery,
+		EnhancedQuery:  enhanced.EnhancedQuery,
+		TaskType:       enhanced.TaskType,
+		Confidence:     enhanced.Confidence,
+		PromptTemplate: enhanced.PromptTemplate,
+		AIResponse:     response,
+		Context:        enhanced.Context,
+	}, nil
+}
+
+// GetPromptService returns the prompt service for direct access
+func (s *Service) GetPromptService() *prompts.PromptService {
+	return s.promptService
+}
+
+// EnhancedQueryResponse represents the response from an enhanced query
+type EnhancedQueryResponse struct {
+	OriginalQuery  string                 `json:"original_query"`
+	EnhancedQuery  string                 `json:"enhanced_query"`
+	TaskType       string                 `json:"task_type"`
+	Confidence     float64                `json:"confidence"`
+	PromptTemplate string                 `json:"prompt_template"`
+	AIResponse     *GenerateResponse      `json:"ai_response"`
+	Context        *prompts.PromptContext `json:"context"`
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/koopa0/assistant-go/internal/ai"
 	"github.com/koopa0/assistant-go/internal/assistant"
 	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
 	"github.com/koopa0/assistant-go/internal/tools"
 	"github.com/koopa0/assistant-go/test/testutil"
 	"github.com/stretchr/testify/assert"

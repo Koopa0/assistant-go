@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/koopa0/assistant-go/internal/observability"
+	"github.com/koopa0/assistant-go/internal/platform/observability"
 	"github.com/koopa0/assistant-go/internal/testutil"
 )
 

@@ -1,84 +1,193 @@
-# Documentation
+# Assistant 智能開發助手 - 文檔中心
 
-This directory contains comprehensive documentation for the Assistant intelligent development companion project.
+歡迎來到 Assistant 智能開發助手的文檔中心。這裡包含了專案的完整技術文檔，幫助開發者、使用者和貢獻者快速了解和使用 Assistant。
 
-## Documents Overview
+## 🚀 快速開始
 
-### [Architecture.md](./Architecture.md)
-Complete system architecture documentation covering:
-- **Conceptual Overview**: High-level system design and philosophy
-- **Intelligence Systems**: Multi-agent architecture and memory systems
-- **Data Flow**: Request processing and context management
-- **Integration Patterns**: External service and tool integration
-- **Technology Stack**: Core technologies and frameworks used
+如果您是第一次接觸 Assistant，建議按以下順序閱讀：
 
-### [API_REFERENCE.md](./API_REFERENCE.md)
-Complete API documentation including:
-- **REST API Endpoints**: HTTP API specifications
-- **Request/Response Formats**: Data structures and schemas
-- **Authentication**: API key management and security
-- **Rate Limiting**: Usage limits and throttling
-- **Error Handling**: Error codes and troubleshooting
+1. [**當前架構文檔**](./CURRENT_ARCHITECTURE.md) - 了解系統設計和技術架構
+2. [**已實現的 API**](./IMPLEMENTED_APIS.md) - 查看可用的 API 端點和功能
+3. [**CLI 功能指南**](./CLI_FUNCTIONALITY.md) - 學習如何使用命令列介面
+4. [**程式碼品質指南**](./CODE_QUALITY.md) - 了解開發標準和最佳實踐
 
-### [OPERATIONS_GUIDE.md](./OPERATIONS_GUIDE.md)
-Production operations and maintenance guide:
-- **Deployment**: Production deployment strategies
-- **Monitoring**: Health checks and observability
-- **Troubleshooting**: Common issues and solutions
-- **Performance**: Optimization and scaling guidelines
-- **Maintenance**: Backup, recovery, and updates
+## 📚 文檔結構
 
-### [TESTING_GUIDE.md](./TESTING_GUIDE.md)
-Comprehensive testing documentation:
-- **Testing Strategy**: Testing philosophy and approaches
-- **Test Categories**: Unit, integration, and E2E testing
-- **Test Environment**: Setup and configuration
-- **Best Practices**: Testing patterns and guidelines
-- **CI/CD Integration**: Automated testing workflows
+### 🏗️ 核心架構文檔
 
-### [CODE_QUALITY.md](./CODE_QUALITY.md)
-Code quality standards and tooling:
-- **Quality Standards**: Coding conventions and best practices
-- **Linting Configuration**: golangci-lint and other tools
-- **Code Review**: Review process and guidelines
-- **Performance**: Benchmarking and optimization
-- **Security**: Security scanning and best practices
+#### [當前架構文檔](./CURRENT_ARCHITECTURE.md)
+**目標讀者**: 架構師、資深開發者  
+**更新頻率**: 架構變更時
 
-## Additional Resources
+完整的系統架構說明，包括：
+- 分層架構設計和設計原則
+- 各組件的詳細實現狀態
+- 資料流和處理管道
+- 部署架構和效能特徵
+- 技術棧和依賴關係
+- 未來架構演進計劃
 
-### API Documentation (`api/`)
-OpenAPI specifications and additional API documentation files.
+### 🔌 API 和功能文檔
 
-## Navigation Guide
+#### [已實現的 API 端點](./IMPLEMENTED_APIS.md)
+**目標讀者**: API 使用者、前端開發者  
+**更新頻率**: API 變更時
 
-### For Developers
-1. Start with [Architecture.md](./Architecture.md) to understand the system design
-2. Review [CODE_QUALITY.md](./CODE_QUALITY.md) for development standards
-3. Follow [TESTING_GUIDE.md](./TESTING_GUIDE.md) for testing practices
+詳細的 API 使用指南，包括：
+- WebSocket 即時通訊連接
+- 記憶系統 API (3個端點)
+- 對話系統 API (4個端點 + 增強功能)
+- 工具系統 API (3個端點 + v2版本)
+- 認證和授權系統
+- 錯誤處理和效能限制
 
-### For Operators
-1. Read [OPERATIONS_GUIDE.md](./OPERATIONS_GUIDE.md) for deployment and maintenance
-2. Use [API_REFERENCE.md](./API_REFERENCE.md) for API integration
-3. Reference [Architecture.md](./Architecture.md) for system understanding
+#### [CLI 功能和使用情境](./CLI_FUNCTIONALITY.md)
+**目標讀者**: CLI 使用者、系統整合者  
+**更新頻率**: CLI 功能變更時
 
-### For API Users
-1. Start with [API_REFERENCE.md](./API_REFERENCE.md) for API specifications
-2. Check [OPERATIONS_GUIDE.md](./OPERATIONS_GUIDE.md) for deployment options
-3. Review [Architecture.md](./Architecture.md) for system capabilities
+完整的命令列使用手冊，包括：
+- 三種操作模式 (伺服器、互動、直接查詢)
+- 豐富的互動命令和工具整合
+- 開發者整合範例 (CI/CD、編輯器、Shell)
+- 故障排除和除錯指南
+- 未來功能規劃
 
-## Contributing to Documentation
+### 📋 開發管理文檔
 
-When updating documentation:
-1. **Keep it current**: Update docs with code changes
-2. **Be comprehensive**: Cover both happy path and edge cases
-3. **Include examples**: Provide practical usage examples
-4. **Link appropriately**: Cross-reference related sections
-5. **Test examples**: Ensure all code examples work
+#### [待完成項目清單](./TODO_ITEMS.md)
+**目標讀者**: 專案經理、開發團隊  
+**更新頻率**: 每週或重大里程碑
 
-## Documentation Standards
+詳細的開發計劃和進度追蹤，包括：
+- 200+ TODO 項目分析和分類
+- 高中低優先級項目規劃
+- 詳細的實施計劃和時程安排
+- 風險評估和成功指標
+- 資源分配和技術需求
 
-- Use clear, concise language
-- Include practical examples
-- Maintain consistent formatting
-- Keep technical accuracy
-- Update with code changes
+#### [程式碼品質指南](./CODE_QUALITY.md)
+**目標讀者**: 開發者、代碼審查者  
+**更新頻率**: 標準變更時
+
+開發標準和品質控制指南，包括：
+- Go 語言最佳實踐和編碼規範
+- 代碼品質檢查流程和工具
+- 測試策略和覆蓋率要求
+- 效能基準和最佳化指南
+- 代碼審查清單和流程
+
+#### [測試指南](./TESTING_GUIDE.md)
+**目標讀者**: 開發者、QA 工程師  
+**更新頻率**: 測試框架變更時
+
+全面的測試策略和實施指南，包括：
+- 單元測試、整合測試、E2E 測試策略
+- 測試框架和工具使用
+- 測試資料管理和環境配置
+- CI/CD 中的測試自動化
+- 效能測試和壓力測試
+
+### 🔧 運維文檔
+
+#### [運維指南](./OPERATIONS_GUIDE.md)
+**目標讀者**: DevOps 工程師、系統管理員  
+**更新頻率**: 運維流程變更時
+
+完整的部署和運維指南，包括：
+- 環境配置和依賴管理
+- 容器化部署和 Kubernetes 配置
+- 監控、日誌和告警設置
+- 故障排除和災難恢復
+- 效能調優和擴展策略
+
+
+## 🎯 按角色導航
+
+### 👨‍💻 開發者
+推薦閱讀順序：
+1. [當前架構文檔](./CURRENT_ARCHITECTURE.md) - 了解系統設計
+2. [程式碼品質指南](./CODE_QUALITY.md) - 學習開發標準
+3. [測試指南](./TESTING_GUIDE.md) - 掌握測試方法
+4. [待完成項目清單](./TODO_ITEMS.md) - 了解開發計劃
+
+### 🔌 API 使用者
+推薦閱讀順序：
+1. [已實現的 API](./IMPLEMENTED_APIS.md) - API 使用指南
+2. [CLI 功能指南](./CLI_FUNCTIONALITY.md) - 命令列工具
+3. [當前架構文檔](./CURRENT_ARCHITECTURE.md) - 理解系統架構
+
+### 🚀 運維人員
+推薦閱讀順序：
+1. [運維指南](./OPERATIONS_GUIDE.md) - 部署和運維
+2. [當前架構文檔](./CURRENT_ARCHITECTURE.md) - 了解系統架構
+3. [程式碼品質指南](./CODE_QUALITY.md) - 理解品質標準
+
+### 📊 專案經理
+推薦閱讀順序：
+1. [待完成項目清單](./TODO_ITEMS.md) - 專案進度和計劃
+2. [當前架構文檔](./CURRENT_ARCHITECTURE.md) - 技術架構概覽
+3. [程式碼品質指南](./CODE_QUALITY.md) - 開發標準和流程
+
+## 📝 文檔狀態
+
+### ✅ 完整且最新
+- [當前架構文檔](./CURRENT_ARCHITECTURE.md)
+- [已實現的 API](./IMPLEMENTED_APIS.md)
+- [CLI 功能指南](./CLI_FUNCTIONALITY.md)
+- [待完成項目清單](./TODO_ITEMS.md)
+
+### 🔄 定期維護
+- [程式碼品質指南](./CODE_QUALITY.md)
+- [測試指南](./TESTING_GUIDE.md)
+- [運維指南](./OPERATIONS_GUIDE.md)
+
+
+## 🤝 如何貢獻
+
+### 文檔改進
+如果您發現文檔中的錯誤或需要改進的地方：
+
+1. **小幅修正**: 直接提交 Pull Request
+2. **大幅變更**: 先開 Issue 討論
+3. **新增文檔**: 遵循現有文檔的結構和格式標準
+
+### 文檔更新流程
+1. 功能開發時同步更新相關文檔
+2. API 變更時更新 API 文檔
+3. 架構變更時更新架構文檔
+4. Release 前檢查所有文檔同步性
+
+## 📞 獲取幫助
+
+### 文檔問題
+- **找不到需要的資訊**: 開 Issue 說明需求
+- **文檔錯誤**: 提交 Pull Request 修正
+- **使用問題**: 查看 [運維指南](./OPERATIONS_GUIDE.md) 或開 Issue
+
+### 技術支援
+- **API 使用問題**: 參考 [已實現的 API](./IMPLEMENTED_APIS.md)
+- **CLI 使用問題**: 參考 [CLI 功能指南](./CLI_FUNCTIONALITY.md)
+- **部署問題**: 參考 [運維指南](./OPERATIONS_GUIDE.md)
+
+## 📊 文檔統計
+
+**總文檔數**: 8 個核心文檔  
+**涵蓋範圍**: 架構、API、CLI、開發、測試、運維  
+**維護狀態**: 積極維護中  
+**最後全面更新**: 2024-06-05
+
+## 🔗 相關連結
+
+- **專案首頁**: [README.md](../README.md)
+- **代碼品質檢查**: `make quick-check`
+- **測試執行**: `make test`
+- **建構專案**: `make build`
+- **API 健康檢查**: `http://localhost:8100/health`
+
+---
+
+**維護者**: Assistant 開發團隊  
+**最後更新**: 2024-06-05  
+**文檔版本**: 2.0  
+
+如有任何問題或建議，歡迎通過 GitHub Issues 與我們聯繫。

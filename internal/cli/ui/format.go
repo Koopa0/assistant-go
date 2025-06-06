@@ -153,3 +153,11 @@ func FormatSQLQuery(query string) string {
 
 	return result
 }
+
+// Divider returns a formatted divider line
+func Divider() string {
+	return strings.Repeat("─", 60)
+}
+
+// SubHeader is a secondary header color (alias for Info)
+var SubHeader = Info

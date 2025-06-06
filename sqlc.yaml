@@ -1,15 +1,16 @@
 version: "2"
 sql:
   - engine: "postgresql"
-    queries: "internal/storage/postgres/queries"
+    queries: "internal/platform/storage/postgres/queries"
     schema:
-      - "internal/storage/postgres/migrations/001_initial_schema.up.sql"
-      - "internal/storage/postgres/migrations/002_langchain_extensions.up.sql"
-      - "internal/storage/postgres/migrations/003_intelligent_features.up.sql"
+      - "internal/platform/storage/postgres/migrations/001_initial_schema.up.sql"
+      - "internal/platform/storage/postgres/migrations/002_langchain_extensions.up.sql"
+      - "internal/platform/storage/postgres/migrations/003_intelligent_features.up.sql"
+      - "internal/platform/storage/postgres/migrations/004_memory_improvements.up.sql"
     gen:
       go:
         package: "sqlc"
-        out: "internal/storage/postgres/sqlc"
+        out: "internal/platform/storage/postgres/sqlc"
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_prepared_queries: true

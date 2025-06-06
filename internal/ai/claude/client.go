@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/koopa0/assistant-go/internal/observability"
+	"github.com/koopa0/assistant-go/internal/platform/observability"
 )
 
 // ProviderConfig represents configuration for an AI provider
@@ -82,6 +82,18 @@ type UsageStats struct {
 	RequestsPerHour float64       `json:"requests_per_hour"`
 }
 
+// Error types for AI providers
+const (
+	ErrorTypeAuthentication = "authentication_error"
+	ErrorTypeRateLimit      = "rate_limit_error"
+	ErrorTypeQuotaExceeded  = "quota_exceeded_error"
+	ErrorTypeInvalidRequest = "invalid_request_error"
+	ErrorTypeServerError    = "server_error"
+	ErrorTypeTimeout        = "timeout_error"
+	ErrorTypeNetworkError   = "network_error"
+	ErrorTypeUnknown        = "unknown_error"
+)
+
 // ProviderError represents an error from an AI provider
 type ProviderError struct {
 	Type      string `json:"type"`
@@ -96,18 +108,6 @@ type ProviderError struct {
 func (e *ProviderError) Error() string {
 	return e.Message
 }
-
-// Error types for AI providers
-const (
-	ErrorTypeAuthentication = "authentication_error"
-	ErrorTypeRateLimit      = "rate_limit_error"
-	ErrorTypeQuotaExceeded  = "quota_exceeded_error"
-	ErrorTypeInvalidRequest = "invalid_request_error"
-	ErrorTypeServerError    = "server_error"
-	ErrorTypeTimeout        = "timeout_error"
-	ErrorTypeNetworkError   = "network_error"
-	ErrorTypeUnknown        = "unknown_error"
-)
 
 // NewProviderError creates a new provider error
 func NewProviderError(errorType, message, provider string) *ProviderError {

@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real Streaming Demo - SSE</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        input[type="text"] {
+            flex: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        
+        button {
+            padding: 10px 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        
+        button:hover {
+            background: #0056b3;
+        }
+        
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        
+        #output {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-family: Monaco, Consolas, monospace;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        
+        .status {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .status.streaming {
+            color: #28a745;
+        }
+        
+        .status.error {
+            color: #dc3545;
+        }
+        
+        .controls {
+            margin-bottom: 20px;
+        }
+        
+        .controls label {
+            margin-right: 10px;
+            font-size: 14px;
+        }
+        
+        .controls select {
+            padding: 5px;
+            font-size: 14px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+        }
+        
+        .metrics {
+            margin-top: 20px;
+            padding: 10px;
+            background: #e9ecef;
+            border-radius: 4px;
+            font-size: 12px;
+            font-family: monospace;
+        }
+        
+        .streaming-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: #28a745;
+            border-radius: 50%;
+            margin-left: 5px;
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.3; }
+            100% { opacity: 1; }
+        }
+        
+        .timestamp {
+            color: #999;
+            font-size: 11px;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Real Streaming Demo - Server-Sent Events</h1>
+        
+        <div class="controls">
+            <label>Provider:</label>
+            <select id="provider">
+                <option value="claude">Claude</option>
+                <option value="gemini">Gemini</option>
+            </select>
+            
+            <label style="margin-left: 20px;">Model:</label>
+            <select id="model">
+                <option value="claude-3-sonnet-20240229">Claude 3 Sonnet</option>
+                <option value="claude-3-opus-20240229">Claude 3 Opus</option>
+                <option value="gemini-pro">Gemini Pro</option>
+            </select>
+        </div>
+        
+        <div class="input-group">
+            <input 
+                type="text" 
+                id="queryInput" 
+                placeholder="Ask a question..." 
+                value="Write a haiku about streaming data"
+            >
+            <button id="sendBtn" onclick="startStream()">Send</button>
+            <button id="stopBtn" onclick="stopStream()" style="display: none;">Stop</button>
+        </div>
+        
+        <div id="output"></div>
+        
+        <div id="status" class="status">Ready to stream</div>
+        
+        <div id="metrics" class="metrics" style="display: none;">
+            <strong>Streaming Metrics:</strong><br>
+            Time to First Token: <span id="ttft">-</span>ms<br>
+            Tokens Received: <span id="tokenCount">0</span><br>
+            Characters: <span id="charCount">0</span><br>
+            Streaming Duration: <span id="duration">0</span>s<br>
+            Tokens/Second: <span id="tokensPerSec">0</span>
+        </div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let startTime = null;
+        let firstTokenTime = null;
+        let tokenCount = 0;
+        let charCount = 0;
+        let streamInterval = null;
+
+        function startStream() {
+            const query = document.getElementById('queryInput').value.trim();
+            if (!query) return;
+
+            // Reset UI
+            document.getElementById('output').textContent = '';
+            document.getElementById('sendBtn').disabled = true;
+            document.getElementById('stopBtn').style.display = 'inline-block';
+            document.getElementById('metrics').style.display = 'block';
+            updateStatus('Connecting...', 'streaming');
+            
+            // Reset metrics
+            startTime = Date.now();
+            firstTokenTime = null;
+            tokenCount = 0;
+            charCount = 0;
+            updateMetrics();
+
+            // Start duration timer
+            streamInterval = setInterval(updateDuration, 100);
+
+            // Prepare request data
+            const requestData = {
+                query: query,
+                provider: document.getElementById('provider').value,
+                model: document.getElementById('model').value
+            };
+
+            // Create EventSource for SSE
+            eventSource = new EventSource('/api/v1/stream?' + new URLSearchParams(requestData));
+
+            eventSource.onopen = function() {
+                updateStatus('Streaming', 'streaming');
+                appendOutput('\n[' + new Date().toLocaleTimeString() + '] Stream started\n\n');
+            };
+
+            eventSource.addEventListener('message', function(event) {
+                const data = JSON.parse(event.data);
+                if (data.data && data.data.content) {
+                    // First token timing
+                    if (firstTokenTime === null) {
+                        firstTokenTime = Date.now();
+                        document.getElementById('ttft').textContent = firstTokenTime - startTime;
+                    }
+                    
+                    // Append content
+                    appendOutput(data.data.content);
+                    
+                    // Update metrics
+                    tokenCount++;
+                    charCount += data.data.content.length;
+                    updateMetrics();
+                }
+            });
+
+            eventSource.addEventListener('complete', function(event) {
+                const data = JSON.parse(event.data);
+                appendOutput('\n\n[' + new Date().toLocaleTimeString() + '] Stream completed');
+                if (data.data) {
+                    appendOutput('\nMetadata: ' + JSON.stringify(data.data, null, 2));
+                }
+                stopStream();
+            });
+
+            eventSource.addEventListener('error', function(event) {
+                if (event.data) {
+                    const data = JSON.parse(event.data);
+                    appendOutput('\n\nError: ' + (data.data.error || data.data.message));
+                }
+                updateStatus('Error occurred', 'error');
+                stopStream();
+            });
+
+            eventSource.addEventListener('end', function(event) {
+                stopStream();
+            });
+
+            eventSource.onerror = function(error) {
+                console.error('EventSource error:', error);
+                updateStatus('Connection error', 'error');
+                stopStream();
+            };
+        }
+
+        function stopStream() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+            }
+            
+            if (streamInterval) {
+                clearInterval(streamInterval);
+                streamInterval = null;
+            }
+            
+            document.getElementById('sendBtn').disabled = false;
+            document.getElementById('stopBtn').style.display = 'none';
+            updateStatus('Stream stopped', '');
+            updateDuration();
+        }
+
+        function appendOutput(text) {
+            const output = document.getElementById('output');
+            output.textContent += text;
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function updateStatus(text, className) {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            status.className = 'status ' + className;
+            
+            if (className === 'streaming') {
+                const indicator = document.createElement('span');
+                indicator.className = 'streaming-indicator';
+                status.appendChild(indicator);
+            }
+        }
+
+        function updateMetrics() {
+            document.getElementById('tokenCount').textContent = tokenCount;
+            document.getElementById('charCount').textContent = charCount;
+            
+            if (startTime && tokenCount > 0) {
+                const elapsed = (Date.now() - startTime) / 1000;
+                const tokensPerSec = (tokenCount / elapsed).toFixed(2);
+                document.getElementById('tokensPerSec').textContent = tokensPerSec;
+            }
+        }
+
+        function updateDuration() {
+            if (startTime) {
+                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+                document.getElementById('duration').textContent = elapsed;
+            }
+        }
+
+        // Handle Enter key
+        document.getElementById('queryInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !document.getElementById('sendBtn').disabled) {
+                startStream();
+            }
+        });
+    </script>
+</body>
+</html>
