@@ -15,6 +15,8 @@ type Querier interface {
 	AddCausalLink(ctx context.Context, arg AddCausalLinkParams) (*EpisodicMemory, error)
 	AddFavoriteTool(ctx context.Context, arg AddFavoriteToolParams) (*AddFavoriteToolRow, error)
 	AddSkillLearningPoint(ctx context.Context, arg AddSkillLearningPointParams) (*UserSkill, error)
+	// Additional conversation queries that were missing
+	ArchiveConversation(ctx context.Context, id pgtype.UUID) error
 	// =====================================================
 	// MEMORY LIFECYCLE OPERATIONS
 	// =====================================================
@@ -170,6 +172,7 @@ type Querier interface {
 	ExtendWorkingMemoryExpiry(ctx context.Context, arg ExtendWorkingMemoryExpiryParams) (*WorkingMemory, error)
 	FindDirectConnections(ctx context.Context, arg FindDirectConnectionsParams) ([]*FindDirectConnectionsRow, error)
 	GetActiveCollaborations(ctx context.Context, dollar_1 pgtype.UUID) ([]*GetActiveCollaborationsRow, error)
+	GetActiveConversations(ctx context.Context, arg GetActiveConversationsParams) ([]*Conversation, error)
 	GetActiveSessions(ctx context.Context, dollar_1 pgtype.UUID) ([]*DevelopmentSession, error)
 	GetActiveUsers(ctx context.Context, arg GetActiveUsersParams) ([]*GetActiveUsersRow, error)
 	GetAgentCollaboration(ctx context.Context, id pgtype.UUID) (*GetAgentCollaborationRow, error)
@@ -188,6 +191,7 @@ type Querier interface {
 	GetAllMessagesByConversation(ctx context.Context, conversationID pgtype.UUID) ([]*GetAllMessagesByConversationRow, error)
 	GetAllUserContext(ctx context.Context, dollar_1 pgtype.UUID) ([]*UserContext, error)
 	GetAllUserPreferences(ctx context.Context, dollar_1 pgtype.UUID) ([]*UserPreference, error)
+	GetArchivedConversations(ctx context.Context, userID pgtype.UUID) ([]*Conversation, error)
 	GetAutomatableProcedures(ctx context.Context, arg GetAutomatableProceduresParams) ([]*ProceduralMemory, error)
 	GetChainExecution(ctx context.Context, id pgtype.UUID) (*ChainExecution, error)
 	GetChainExecutionStats(ctx context.Context, arg GetChainExecutionStatsParams) (*GetChainExecutionStatsRow, error)
@@ -358,11 +362,13 @@ type Querier interface {
 	SearchSimilarEmbeddings(ctx context.Context, arg SearchSimilarEmbeddingsParams) ([]*SearchSimilarEmbeddingsRow, error)
 	SearchSimilarEmbeddingsAllTypes(ctx context.Context, arg SearchSimilarEmbeddingsAllTypesParams) ([]*SearchSimilarEmbeddingsAllTypesRow, error)
 	SearchUsers(ctx context.Context, arg SearchUsersParams) ([]*SearchUsersRow, error)
+	UnarchiveConversation(ctx context.Context, id pgtype.UUID) error
 	UpdateAgentCapabilities(ctx context.Context, arg UpdateAgentCapabilitiesParams) (*AgentDefinition, error)
 	UpdateAgentPerformance(ctx context.Context, arg UpdateAgentPerformanceParams) (*AgentDefinition, error)
 	UpdateAutomationConfidence(ctx context.Context, arg UpdateAutomationConfidenceParams) (*ProceduralMemory, error)
 	UpdateCollaborationExecution(ctx context.Context, arg UpdateCollaborationExecutionParams) (*AgentCollaboration, error)
 	UpdateConversation(ctx context.Context, arg UpdateConversationParams) (*UpdateConversationRow, error)
+	UpdateConversationSummary(ctx context.Context, arg UpdateConversationSummaryParams) error
 	UpdateEmbedding(ctx context.Context, arg UpdateEmbeddingParams) (*Embedding, error)
 	UpdateEpisodicMemoryAccess(ctx context.Context, id pgtype.UUID) (*EpisodicMemory, error)
 	UpdateEpisodicMemoryImportance(ctx context.Context, arg UpdateEpisodicMemoryImportanceParams) (*EpisodicMemory, error)

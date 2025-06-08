@@ -72,7 +72,7 @@ WHERE u.id = $1 AND u.is_active = true
 GROUP BY u.id, u.username, u.email, u.full_name, u.created_at;
 
 -- name: GetActiveUsers :many
-SELECT id, username, email, full_name, avatar_url, created_at, updated_at
+SELECT id, username, email, full_name, avatar_url, preferences, is_active, created_at, updated_at
 FROM users 
 WHERE is_active = true
 ORDER BY created_at DESC
@@ -82,7 +82,7 @@ LIMIT $1 OFFSET $2;
 SELECT COUNT(*) FROM users WHERE is_active = true;
 
 -- name: SearchUsers :many
-SELECT id, username, email, full_name, avatar_url, created_at, updated_at
+SELECT id, username, email, full_name, avatar_url, preferences, is_active, created_at, updated_at
 FROM users 
 WHERE is_active = true 
   AND (

@@ -7,37 +7,41 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/koopa0/assistant-go/internal/analytics"
 	"github.com/koopa0/assistant-go/internal/assistant"
+	"github.com/koopa0/assistant-go/internal/chat"
+	"github.com/koopa0/assistant-go/internal/collaboration"
 	"github.com/koopa0/assistant-go/internal/config"
-	converrors "github.com/koopa0/assistant-go/internal/core/conversation"
-	"github.com/koopa0/assistant-go/internal/errors"
+	"github.com/koopa0/assistant-go/internal/conversation"
+	assterrors "github.com/koopa0/assistant-go/internal/errors"
+	"github.com/koopa0/assistant-go/internal/knowledge"
+	langchainhttp "github.com/koopa0/assistant-go/internal/langchain/http"
+	"github.com/koopa0/assistant-go/internal/learning"
+	"github.com/koopa0/assistant-go/internal/memory"
+	memoryhttp "github.com/koopa0/assistant-go/internal/memory/http"
 	"github.com/koopa0/assistant-go/internal/platform/observability"
-	"github.com/koopa0/assistant-go/internal/platform/server/analytics"
-	"github.com/koopa0/assistant-go/internal/platform/server/chat"
-	"github.com/koopa0/assistant-go/internal/platform/server/collaboration"
-	"github.com/koopa0/assistant-go/internal/platform/server/conversation"
-	"github.com/koopa0/assistant-go/internal/platform/server/knowledge"
-	langchain "github.com/koopa0/assistant-go/internal/platform/server/langchain"
-	"github.com/koopa0/assistant-go/internal/platform/server/learning"
-	"github.com/koopa0/assistant-go/internal/platform/server/memory"
-	"github.com/koopa0/assistant-go/internal/platform/server/sse"
-	"github.com/koopa0/assistant-go/internal/platform/server/system"
-	"github.com/koopa0/assistant-go/internal/platform/server/toolsapi"
-	"github.com/koopa0/assistant-go/internal/platform/server/users"
-	"github.com/koopa0/assistant-go/internal/platform/server/websocket"
+	"github.com/koopa0/assistant-go/internal/platform/server/middleware"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres/sqlc"
+	"github.com/koopa0/assistant-go/internal/system"
+	systemhttp "github.com/koopa0/assistant-go/internal/system/http"
+	toolhttp "github.com/koopa0/assistant-go/internal/tool/http"
+	"github.com/koopa0/assistant-go/internal/transport/sse"
+	"github.com/koopa0/assistant-go/internal/transport/websocket"
+	"github.com/koopa0/assistant-go/internal/user"
 )
 
 // Server represents the HTTP API server
 type Server struct {
-	assistant *assistant.Assistant
-	logger    *slog.Logger
-	server    *http.Server
-	mux       *http.ServeMux
-	config    config.ServerConfig
-	metrics   *observability.Metrics
+	assistant   *assistant.Assistant
+	logger      *slog.Logger
+	server      *http.Server
+	mux         *http.ServeMux
+	config      config.ServerConfig
+	metrics     *observability.Metrics
+	rateLimiter *middleware.RateLimitMiddleware
 }
 
 // New creates a new HTTP API server
@@ -52,23 +56,24 @@ func New(cfg config.ServerConfig, assistant *assistant.Assistant, logger *slog.L
 	// Create server mux
 	mux := http.NewServeMux()
 
-	// Create HTTP server
-	httpServer := &http.Server{
-		Addr:         cfg.Address,
-		Handler:      mux,
-		ReadTimeout:  cfg.ReadTimeout,
-		WriteTimeout: cfg.WriteTimeout,
-		IdleTimeout:  cfg.IdleTimeout,
-	}
-
+	// Create server instance first
 	server := &Server{
 		config:    cfg,
 		assistant: assistant,
 		logger:    observability.ServerLogger(logger, "http"),
-		server:    httpServer,
 		mux:       mux,
 		metrics:   metrics,
 	}
+
+	// Create HTTP server with middleware
+	httpServer := &http.Server{
+		Addr:         cfg.Address,
+		Handler:      server.withMiddleware(mux),
+		ReadTimeout:  cfg.ReadTimeout,
+		WriteTimeout: cfg.WriteTimeout,
+		IdleTimeout:  cfg.IdleTimeout,
+	}
+	server.server = httpServer
 
 	// Setup routes
 	server.setupRoutes()
@@ -112,10 +117,6 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 // setupRoutes sets up the HTTP API routes
 func (s *Server) setupRoutes() {
-	// Apply middleware
-	handler := s.withMiddleware(s.mux)
-	s.server.Handler = handler
-
 	// Get database queries
 	var sqlcQueries *sqlc.Queries
 	if s.assistant.GetDB() != nil {
@@ -123,28 +124,34 @@ func (s *Server) setupRoutes() {
 	}
 
 	// JWT secret for auth (in production, load from config)
-	jwtSecret := "your-secret-key-change-in-production"
+	jwtSecret := s.config.Security.JWTSecret
+	if jwtSecret == "" {
+		jwtSecret = "your-secret-key-change-in-production"
+	}
 
 	// === Domain-Driven API Services ===
 
 	// Auth Service
-	authService := users.NewAuthService(sqlcQueries, s.logger, s.metrics, jwtSecret)
-	authHandler := users.NewAuthHTTPHandler(authService)
+	authService := user.NewAuthService(sqlcQueries, s.logger, s.metrics, jwtSecret)
+	authHandler := user.NewAuthHTTPHandler(authService)
 	authHandler.RegisterRoutes(s.mux)
 
 	// Users Service
 	if sqlcQueries != nil {
-		usersService := users.NewUserService(sqlcQueries, s.logger, s.metrics)
-		usersHandler := users.NewHTTPHandler(usersService, s.logger)
+		usersService := user.NewUserService(sqlcQueries, s.logger, s.metrics)
+		usersHandler := user.NewHTTPHandler(usersService, s.logger)
 		usersHandler.RegisterRoutes(s.mux)
 	}
 
 	// Memory Service - 記憶系統 API
 	if sqlcQueries != nil {
-		// Create concrete memory store adapter for the assistant
-		memoryStore := memory.NewAssistantMemoryAdapter(s.assistant)
-		memoryService := memory.NewMemoryService(memoryStore, s.logger, s.metrics)
-		memoryHandler := memory.NewHTTPHandler(memoryService, s.logger)
+		// Create database-backed memory service
+		coreMemoryService := memory.NewService(sqlcQueries, s.logger)
+		// Create database memory store using the core service
+		memoryStore := memory.NewDatabaseMemoryStore(coreMemoryService, s.logger)
+		// Create HTTP memory service that implements HTTPMemoryServiceInterface
+		httpMemoryService := memory.NewMemoryService(memoryStore, s.logger, s.metrics)
+		memoryHandler := memoryhttp.NewHandler(httpMemoryService, s.logger)
 		memoryHandler.RegisterRoutes(s.mux)
 	}
 
@@ -156,16 +163,18 @@ func (s *Server) setupRoutes() {
 	}
 
 	// Consolidated Tools API - 工具系統 API
-	toolsHandler := toolsapi.NewHTTPHandler(s.assistant, sqlcQueries, s.logger, s.metrics)
+	toolsHandler := toolhttp.NewHandler(s.assistant.AsToolInterface(), sqlcQueries, s.logger, s.metrics)
 	toolsHandler.RegisterRoutes(s.mux)
 
 	// System Service
-	systemService := system.NewSystemService(s.assistant, sqlcQueries, s.logger, s.metrics)
-	systemHandler := system.NewHTTPHandler(systemService)
-	systemHandler.RegisterRoutes(s.mux)
+	if sqlcQueries != nil {
+		systemService := system.NewService(s.assistant, sqlcQueries, s.logger, s.metrics)
+		systemHandler := systemhttp.NewHandler(systemService, s.logger)
+		systemHandler.RegisterRoutes(s.mux)
+	}
 
 	// Conversation Service
-	conversationService := conversation.NewConversationService(s.assistant, sqlcQueries, s.logger, s.metrics)
+	conversationService := conversation.NewConversationService(s.assistant.AsConversationInterface(), sqlcQueries, s.logger, s.metrics)
 	conversationHandler := conversation.NewHTTPHandler(conversationService)
 	conversationHandler.RegisterRoutes(s.mux)
 
@@ -193,9 +202,11 @@ func (s *Server) setupRoutes() {
 	}
 
 	// Knowledge Service
-	knowledgeService := knowledge.NewKnowledgeService(s.assistant, s.logger, s.metrics)
-	knowledgeHandler := knowledge.NewHTTPHandler(knowledgeService)
-	knowledgeHandler.RegisterRoutes(s.mux)
+	if sqlcQueries != nil {
+		knowledgeService := knowledge.NewKnowledgeService(s.assistant, s.logger, s.metrics, sqlcQueries)
+		knowledgeHandler := knowledge.NewHTTPHandler(knowledgeService)
+		knowledgeHandler.RegisterRoutes(s.mux)
+	}
 
 	// Learning Service
 	if sqlcQueries != nil {
@@ -213,9 +224,11 @@ func (s *Server) setupRoutes() {
 
 	// LangChain Service (if available)
 	if langchainService := s.assistant.GetLangChainService(); langchainService != nil {
-		langchainSvc := langchain.NewLangChainService(langchainService, s.logger)
-		langchainHandler := langchain.NewHTTPHandler(langchainSvc, s.logger)
-		langchainHandler.RegisterRoutes(s.mux)
+		langchainHandler := langchainhttp.NewHandler(langchainService, s.logger)
+		// Register individual routes
+		s.mux.HandleFunc("GET /api/langchain/agents", langchainHandler.GetAvailableAgents)
+		s.mux.HandleFunc("POST /api/langchain/agents/{type}/execute", langchainHandler.ExecuteAgent)
+		s.mux.HandleFunc("POST /api/langchain/execute", langchainHandler.ExecutePrompt)
 		s.logger.Info("LangChain API routes registered")
 	}
 
@@ -252,6 +265,9 @@ func (s *Server) withMiddleware(handler http.Handler) http.Handler {
 	// Request ID middleware
 	handler = s.requestIDMiddleware(handler)
 
+	// Rate limiting middleware
+	handler = s.rateLimitMiddleware(handler)
+
 	return handler
 }
 
@@ -282,11 +298,12 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.writeJSONResponse(w, http.StatusOK, map[string]interface{}{
-		"status":    "running",
-		"timestamp": time.Now().UTC().Format(time.RFC3339),
-		"stats":     stats,
-	})
+	response := StatusResponse{
+		Status:    "running",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Stats:     stats,
+	}
+	s.writeJSONResponse(w, http.StatusOK, response)
 }
 
 // Query endpoint
@@ -305,15 +322,15 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		s.logger.Error("Query processing failed", slog.Any("error", err))
 
 		// Handle different error types
-		if assistantErr := errors.GetAssistantError(err); assistantErr != nil {
+		if assistantErr := assterrors.GetAssistantError(err); assistantErr != nil {
 			// Map error categories to HTTP status codes
 			var statusCode int
 			switch assistantErr.Category {
-			case errors.CategoryValidation:
+			case assterrors.CategoryValidation:
 				statusCode = http.StatusBadRequest
-			case errors.CategoryAuthentication, errors.CategoryAuthorization:
+			case assterrors.CategoryAuthentication, assterrors.CategoryAuthorization:
 				statusCode = http.StatusUnauthorized
-			case errors.CategoryInfrastructure:
+			case assterrors.CategoryInfrastructure:
 				if assistantErr.Retryable {
 					statusCode = http.StatusServiceUnavailable
 				} else {
@@ -353,7 +370,8 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	conversation, err := s.assistant.GetConversation(ctx, conversationID)
 	if err != nil {
 		// Check if it's a conversation not found error
-		if converrors.IsConversationNotFoundError(err) {
+		// For now, just check the error message
+		if err.Error() == "conversation not found" || strings.Contains(err.Error(), "not found") {
 			http.Error(w, "Conversation not found", http.StatusNotFound)
 		} else {
 			s.logger.Error("Failed to get conversation", slog.Any("error", err))
@@ -376,7 +394,7 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	if err := s.assistant.DeleteConversation(ctx, conversationID); err != nil {
 		// Check if it's a conversation not found error
-		if converrors.IsConversationNotFoundError(err) {
+		if conversation.IsConversationNotFoundError(err) {
 			http.Error(w, "Conversation not found", http.StatusNotFound)
 		} else {
 			s.logger.Error("Failed to delete conversation", slog.Any("error", err))

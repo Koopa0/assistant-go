@@ -9,7 +9,7 @@ import (
 	"github.com/koopa0/assistant-go/internal/config"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
 	"github.com/koopa0/assistant-go/internal/testutil"
-	"github.com/koopa0/assistant-go/internal/tools"
+	"github.com/koopa0/assistant-go/internal/tool"
 )
 
 // TestProcessorCreation tests processor creation and initialization
@@ -18,7 +18,7 @@ func TestProcessorCreation(t *testing.T) {
 		name        string
 		cfg         *config.Config
 		db          postgres.DB
-		registry    *tools.Registry
+		registry    *tool.Registry
 		expectError bool
 		errorType   string
 	}{
@@ -35,7 +35,7 @@ func TestProcessorCreation(t *testing.T) {
 				},
 			},
 			db:          postgres.NewMockClient(testutil.NewSilentLogger()),
-			registry:    tools.NewRegistry(testutil.NewTestLogger()),
+			registry:    tool.NewRegistry(testutil.NewTestLogger()),
 			expectError: false,
 		},
 		{
@@ -51,14 +51,14 @@ func TestProcessorCreation(t *testing.T) {
 				},
 			},
 			db:          postgres.NewMockClient(testutil.NewSilentLogger()),
-			registry:    tools.NewRegistry(testutil.NewTestLogger()),
+			registry:    tool.NewRegistry(testutil.NewTestLogger()),
 			expectError: false,
 		},
 		{
 			name:        "nil_config",
 			cfg:         nil,
 			db:          postgres.NewMockClient(testutil.NewSilentLogger()),
-			registry:    tools.NewRegistry(testutil.NewTestLogger()),
+			registry:    tool.NewRegistry(testutil.NewTestLogger()),
 			expectError: true,
 			errorType:   "config",
 		},
@@ -66,7 +66,7 @@ func TestProcessorCreation(t *testing.T) {
 			name:        "nil_database",
 			cfg:         &config.Config{Mode: "test"},
 			db:          nil,
-			registry:    tools.NewRegistry(testutil.NewTestLogger()),
+			registry:    tool.NewRegistry(testutil.NewTestLogger()),
 			expectError: true,
 			errorType:   "database",
 		},
@@ -186,7 +186,7 @@ func TestProcessorQueryProcessing(t *testing.T) {
 				},
 			}
 			mockDB := postgres.NewMockClient(testutil.NewSilentLogger())
-			registry := tools.NewRegistry(testutil.NewTestLogger())
+			registry := tool.NewRegistry(testutil.NewTestLogger())
 			logger := testutil.NewTestLogger()
 
 			processor, err := NewProcessor(cfg, mockDB, registry, logger)
@@ -245,7 +245,7 @@ func TestProcessorHealth(t *testing.T) {
 		},
 	}
 	mockDB := postgres.NewMockClient(testutil.NewSilentLogger())
-	registry := tools.NewRegistry(testutil.NewTestLogger())
+	registry := tool.NewRegistry(testutil.NewTestLogger())
 	logger := testutil.NewTestLogger()
 
 	processor, err := NewProcessor(cfg, mockDB, registry, logger)
@@ -281,7 +281,7 @@ func TestProcessorStats(t *testing.T) {
 		},
 	}
 	mockDB := postgres.NewMockClient(testutil.NewSilentLogger())
-	registry := tools.NewRegistry(testutil.NewTestLogger())
+	registry := tool.NewRegistry(testutil.NewTestLogger())
 	logger := testutil.NewTestLogger()
 
 	processor, err := NewProcessor(cfg, mockDB, registry, logger)

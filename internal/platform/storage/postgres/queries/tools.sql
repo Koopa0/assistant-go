@@ -6,14 +6,16 @@ INSERT INTO tool_executions (
     error_message, execution_time_ms, started_at, completed_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9
-) RETURNING *;
+) RETURNING id, message_id, tool_name, input_data, output_data, status, error_message, execution_time_ms, started_at, completed_at;
 
 -- name: GetToolExecution :one
-SELECT * FROM tool_executions
+SELECT id, message_id, tool_name, input_data, output_data, status, error_message, execution_time_ms, started_at, completed_at
+FROM tool_executions
 WHERE id = $1;
 
 -- name: GetToolExecutionsByUser :many
-SELECT te.* FROM tool_executions te
+SELECT te.id, te.message_id, te.tool_name, te.input_data, te.output_data, te.status, te.error_message, te.execution_time_ms, te.started_at, te.completed_at
+FROM tool_executions te
 JOIN messages m ON te.message_id = m.id
 JOIN conversations c ON m.conversation_id = c.id
 WHERE c.user_id = $1
@@ -22,7 +24,8 @@ ORDER BY te.started_at DESC
 LIMIT $2 OFFSET $3;
 
 -- name: GetToolExecutionsByTool :many
-SELECT te.* FROM tool_executions te
+SELECT te.id, te.message_id, te.tool_name, te.input_data, te.output_data, te.status, te.error_message, te.execution_time_ms, te.started_at, te.completed_at
+FROM tool_executions te
 JOIN messages m ON te.message_id = m.id
 JOIN conversations c ON m.conversation_id = c.id
 WHERE te.tool_name = $1
@@ -75,13 +78,13 @@ SET
     output_data = $3,
     error_message = $4,
     execution_time_ms = $5,
-    completed_at = $6,
-    updated_at = NOW()
+    completed_at = $6
 WHERE id = $1
-RETURNING *;
+RETURNING id, message_id, tool_name, input_data, output_data, status, error_message, execution_time_ms, started_at, completed_at;
 
 -- name: GetRecentToolExecutions :many
-SELECT te.* FROM tool_executions te
+SELECT te.id, te.message_id, te.tool_name, te.input_data, te.output_data, te.status, te.error_message, te.execution_time_ms, te.started_at, te.completed_at
+FROM tool_executions te
 JOIN messages m ON te.message_id = m.id
 JOIN conversations c ON m.conversation_id = c.id
 WHERE c.user_id = $1
@@ -129,7 +132,8 @@ DELETE FROM tool_executions
 WHERE started_at < $1;
 
 -- name: GetToolExecutionsByStatus :many
-SELECT te.* FROM tool_executions te
+SELECT te.id, te.message_id, te.tool_name, te.input_data, te.output_data, te.status, te.error_message, te.execution_time_ms, te.started_at, te.completed_at
+FROM tool_executions te
 JOIN messages m ON te.message_id = m.id
 JOIN conversations c ON m.conversation_id = c.id
 WHERE c.user_id = $1
@@ -138,6 +142,7 @@ ORDER BY te.started_at DESC
 LIMIT $3 OFFSET $4;
 
 -- name: GetToolExecutionsByMessage :many
-SELECT * FROM tool_executions
+SELECT id, message_id, tool_name, input_data, output_data, status, error_message, execution_time_ms, started_at, completed_at
+FROM tool_executions
 WHERE message_id = $1
 ORDER BY started_at ASC;

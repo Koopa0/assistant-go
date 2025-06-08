@@ -12,12 +12,11 @@ import (
 	"github.com/koopa0/assistant-go/internal/ai"
 	aierrors "github.com/koopa0/assistant-go/internal/ai"
 	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/core/conversation"
-	converrors "github.com/koopa0/assistant-go/internal/core/conversation"
-	userserrors "github.com/koopa0/assistant-go/internal/platform/server/users"
+	"github.com/koopa0/assistant-go/internal/conversation"
+	converrors "github.com/koopa0/assistant-go/internal/conversation"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
-	"github.com/koopa0/assistant-go/internal/tools"
-	toolerrors "github.com/koopa0/assistant-go/internal/tools"
+	"github.com/koopa0/assistant-go/internal/tool"
+	userserrors "github.com/koopa0/assistant-go/internal/user"
 )
 
 // Processor handles the request processing pipeline for the Assistant.
@@ -33,14 +32,15 @@ import (
 type Processor struct {
 	config          *config.Config
 	db              postgres.DB
-	registry        *tools.Registry
+	registry        *tool.Registry
 	logger          *slog.Logger
-	conversationMgr *conversation.Manager
+	conversationMgr conversation.ConversationService
 	aiService       *ai.Service
+	envDetector     *EnvironmentDetector
 }
 
 // NewProcessor creates a new processor with enhanced error handling
-func NewProcessor(cfg *config.Config, db postgres.DB, registry *tools.Registry, logger *slog.Logger) (*Processor, error) {
+func NewProcessor(cfg *config.Config, db postgres.DB, registry *tool.Registry, logger *slog.Logger) (*Processor, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
@@ -54,10 +54,7 @@ func NewProcessor(cfg *config.Config, db postgres.DB, registry *tools.Registry, 
 		return nil, fmt.Errorf("logger is required")
 	}
 
-	conversationMgr, err := conversation.NewManager(db, logger)
-	if err != nil {
-		return nil, NewAssistantInitializationError("conversation_manager", err)
-	}
+	conversationMgr := conversation.NewConversationSystem(db.GetQueries(), logger)
 
 	// Initialize AI service
 	aiService, err := ai.NewService(cfg, logger)
@@ -72,6 +69,7 @@ func NewProcessor(cfg *config.Config, db postgres.DB, registry *tools.Registry, 
 		logger:          logger,
 		conversationMgr: conversationMgr,
 		aiService:       aiService,
+		envDetector:     NewEnvironmentDetector(),
 	}, nil
 }
 
@@ -158,10 +156,19 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 		return nil, enhancedErr
 	}
 
+	// Get conversation messages
+	messages, err := p.conversationMgr.GetMessages(ctx, conversation.ID)
+	if err != nil {
+		p.logger.Warn("Failed to get conversation messages",
+			slog.String("conversation_id", conversation.ID),
+			slog.Any("error", err))
+		messages = nil // Empty messages on error
+	}
+
 	p.logger.Debug("Conversation context established",
 		slog.String("conversation_id", conversation.ID),
 		slog.String("user_id", conversation.UserID),
-		slog.Int("message_count", len(conversation.Messages)),
+		slog.Int("message_count", len(messages)),
 		slog.Any("workspace_context", enrichedContext.Workspace),
 		slog.Any("memory_context", enrichedContext.Memory))
 
@@ -184,7 +191,7 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 		messageContext["user"] = enrichedContext.User
 	}
 
-	userMessage, err := p.conversationMgr.AddMessage(ctx, conversation.ID, "user", request.Query, messageContext)
+	userMessage, err := p.conversationMgr.AddMessage(ctx, conversation.ID, "user", request.Query)
 	if err != nil {
 		p.logger.Error("Failed to add user message",
 			slog.String("conversation_id", conversation.ID),
@@ -223,7 +230,7 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 		slog.String("model", model),
 		slog.String("conversation_id", conversation.ID))
 
-	response, tokensUsed, err := p.processWithAI(ctx, conversation, request, provider, model, enrichedContext)
+	response, tokensUsed, err := p.processWithAI(ctx, conversation, messages, request, provider, model, enrichedContext)
 	if err != nil {
 		p.logger.Error("AI processing failed",
 			slog.String("provider", provider),
@@ -234,7 +241,7 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 	}
 
 	// Step 7: Add assistant response to conversation
-	assistantMessage, err := p.conversationMgr.AddMessage(ctx, conversation.ID, "assistant", response, nil)
+	assistantMessage, err := p.conversationMgr.AddMessage(ctx, conversation.ID, "assistant", response)
 	if err != nil {
 		p.logger.Error("Failed to add assistant message to conversation",
 			slog.String("conversation_id", conversation.ID),
@@ -258,7 +265,7 @@ func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryR
 		TokensUsed:     tokensUsed,
 		ExecutionTime:  time.Since(startTime),
 		Context: map[string]interface{}{
-			"conversation_message_count": len(conversation.Messages) + 2, // +2 for user and assistant messages
+			"conversation_message_count": len(messages) + 2, // +2 for user and assistant messages
 			"processing_steps":           []string{"validation", "context", "ai_generation", "storage"},
 		},
 	}
@@ -320,7 +327,7 @@ func (p *Processor) validateRequest(request *QueryRequest) error {
 	if len(request.Tools) > 0 {
 		for _, toolName := range request.Tools {
 			if !p.registry.IsRegistered(toolName) {
-				return toolerrors.NewToolNotRegisteredError(toolName)
+				return tool.NewToolNotRegisteredError(toolName)
 			}
 		}
 	}
@@ -416,62 +423,78 @@ func (p *Processor) generateConversationTitle(query string) string {
 }
 
 // processWithAI processes the request with the AI provider using enriched context
-func (p *Processor) processWithAI(ctx context.Context, conversation *conversation.Conversation, request *QueryRequest, provider, model string, enrichedContext *ProcessorContext) (string, int, error) {
+func (p *Processor) processWithAI(ctx context.Context, conversation *conversation.Conversation, messages []*conversation.Message, request *QueryRequest, provider, model string, enrichedContext *ProcessorContext) (string, int, error) {
 	p.logger.Debug("Processing with AI provider",
 		slog.String("provider", provider),
 		slog.String("model", model),
 		slog.String("conversation_id", conversation.ID))
 
 	// Convert conversation messages to AI format
-	messages := make([]ai.Message, 0, len(conversation.Messages)+1)
+	aiMessages := make([]ai.Message, 0, len(messages)+1)
 
 	// Add conversation history (limit to recent messages to avoid token limits)
 	maxHistoryMessages := 20 // Increased from 10 for better context retention
 	// TODO: Make configurable based on token limits and model
 	startIdx := 0
-	if len(conversation.Messages) > maxHistoryMessages {
-		startIdx = len(conversation.Messages) - maxHistoryMessages
+	if len(messages) > maxHistoryMessages {
+		startIdx = len(messages) - maxHistoryMessages
 	}
 
-	for i := startIdx; i < len(conversation.Messages); i++ {
-		msg := conversation.Messages[i]
-		messages = append(messages, ai.Message{
+	for i := startIdx; i < len(messages); i++ {
+		msg := messages[i]
+		aiMessages = append(aiMessages, ai.Message{
 			Role:    msg.Role,
 			Content: msg.Content,
 		})
 	}
 
 	// Add current user message
-	messages = append(messages, ai.Message{
+	aiMessages = append(aiMessages, ai.Message{
 		Role:    "user",
 		Content: request.Query,
 	})
 
 	// Prepare AI request with enriched context
-	requestMetadata := request.Context
-	if requestMetadata == nil {
-		requestMetadata = make(map[string]interface{})
+	aiMetadata := &ai.RequestMetadata{
+		Features: make(map[string]string),
 	}
-	// Merge enriched context - convert ProcessorContext to map for compatibility
+
+	// Extract user information from request context
+	if request.Context != nil {
+		if userID, ok := request.Context["user_id"].(string); ok {
+			aiMetadata.UserID = userID
+		}
+		if sessionID, ok := request.Context["session_id"].(string); ok {
+			aiMetadata.SessionID = sessionID
+		}
+		if conversationID, ok := request.Context["conversation_id"].(string); ok {
+			aiMetadata.ConversationID = conversationID
+		}
+		if requestID, ok := request.Context["request_id"].(string); ok {
+			aiMetadata.RequestID = requestID
+		}
+	}
+
+	// Store enriched context information in features
 	if enrichedContext.Workspace != nil {
-		requestMetadata["workspace"] = enrichedContext.Workspace
+		aiMetadata.Features["has_workspace"] = "true"
 	}
 	if enrichedContext.Memory != nil {
-		requestMetadata["memory"] = enrichedContext.Memory
+		aiMetadata.Features["has_memory"] = "true"
 	}
 	if enrichedContext.Query != nil {
-		requestMetadata["query"] = enrichedContext.Query
+		aiMetadata.Features["has_query"] = "true"
 	}
 	if enrichedContext.User != nil {
-		requestMetadata["user"] = enrichedContext.User
+		aiMetadata.Features["has_user"] = "true"
 	}
 
 	aiRequest := &ai.GenerateRequest{
-		Messages:    messages,
+		Messages:    aiMessages,
 		MaxTokens:   p.getMaxTokens(provider, request),
 		Temperature: p.getTemperature(provider, request),
 		Model:       model,
-		Metadata:    requestMetadata,
+		Metadata:    aiMetadata,
 	}
 
 	// Add context-aware system prompt
@@ -607,8 +630,8 @@ func (p *Processor) Stats(ctx context.Context) (map[string]interface{}, error) {
 	// Add processor metadata
 	stats["processor"] = map[string]interface{}{
 		"status":  "healthy",
-		"version": "1.0.0",                         // TODO: Get from build info
-		"uptime":  time.Since(time.Now()).String(), // TODO: Track actual uptime
+		"version": p.envDetector.GetVersion(),
+		"uptime":  p.envDetector.GetUptime().String(),
 	}
 
 	p.logger.Debug("Statistics collected successfully",
@@ -647,7 +670,7 @@ func (p *Processor) executeTools(ctx context.Context, toolNames []string, toolPa
 		}
 
 		// Get tool instance
-		tool, err := p.registry.GetTool(toolName, nil) // Use nil config for now
+		toolInstance, err := p.registry.GetTool(toolName, nil) // Use nil config for now
 		if err != nil {
 			p.logger.Error("Failed to get tool instance",
 				slog.String("tool", toolName),
@@ -661,7 +684,7 @@ func (p *Processor) executeTools(ctx context.Context, toolNames []string, toolPa
 		}
 
 		// Prepare tool input with typed structure
-		toolInput := &tools.ToolInput{
+		toolInput := &tool.ToolInput{
 			Parameters: make(map[string]interface{}),
 		}
 
@@ -675,7 +698,7 @@ func (p *Processor) executeTools(ctx context.Context, toolNames []string, toolPa
 		}
 
 		// Execute tool with timeout (use anonymous function to avoid defer accumulation)
-		var result *tools.ToolResult
+		var result *tool.ToolResult
 		var toolErr error
 		var executionTime time.Duration
 		func() {
@@ -683,7 +706,7 @@ func (p *Processor) executeTools(ctx context.Context, toolNames []string, toolPa
 			defer cancel()
 
 			startTime := time.Now()
-			result, toolErr = tool.Execute(toolCtx, toolInput)
+			result, toolErr = toolInstance.Execute(toolCtx, toolInput)
 			executionTime = time.Since(startTime)
 		}()
 
@@ -740,10 +763,7 @@ func (p *Processor) Close(ctx context.Context) error {
 		p.logger.Error("Failed to close AI manager", slog.Any("error", err))
 	}
 
-	// Close context manager
-	if err := p.conversationMgr.Close(ctx); err != nil {
-		return fmt.Errorf("failed to close context manager: %w", err)
-	}
+	// Note: conversation manager doesn't require explicit close
 
 	return nil
 }
@@ -995,37 +1015,8 @@ func (p *Processor) buildEnrichedContext(ctx context.Context, request *QueryRequ
 
 // detectWorkspaceContext detects the current workspace context
 func (p *Processor) detectWorkspaceContext(ctx context.Context, request *QueryRequest) (*WorkspaceContext, error) {
-	// Default workspace detection - in production this would be more sophisticated
-	// TODO: Move these to configuration or environment detection
-	const (
-		defaultProjectType = "go_project"
-		defaultLanguage    = "go"
-	)
-
-	workspaceContext := &WorkspaceContext{
-		ProjectType:        defaultProjectType,
-		Languages:          []string{defaultLanguage},
-		Framework:          "standard_library", // TODO: Detect from go.mod
-		Dependencies:       []string{"net/http", "pgx", "slog"},
-		StructureType:      "monorepo",
-		ConfigFiles:        []string{"go.mod", "go.sum", "configs/development.yaml"},
-		DocumentationStyle: "godoc",
-		Metadata: map[string]string{
-			"project_path":    "/Users/koopa/go/src/github.com/koopa0/assistant-go", // TODO: Get from environment
-			"git_repository":  "assistant-go",                                       // TODO: Detect from git
-			"tools_available": "go_analyzer,docker,kubernetes",                      // TODO: Detect available tools
-			"detected_at":     time.Now().Format(time.RFC3339),
-		},
-	}
-
-	// TODO: Implement actual workspace detection:
-	// - Check current working directory
-	// - Analyze project files (go.mod, package.json, requirements.txt, etc.)
-	// - Detect git repository information
-	// - Identify frameworks and dependencies
-	// - Check for configuration files
-
-	return workspaceContext, nil
+	// Use environment detector to get actual workspace information
+	return p.envDetector.DetectWorkspace(), nil
 }
 
 // retrieveMemoryContext retrieves relevant memory context
@@ -1251,6 +1242,15 @@ func (p *Processor) ProcessStream(ctx context.Context, request *QueryRequest) (<
 			return
 		}
 
+		// Get conversation messages
+		messages, err := p.conversationMgr.GetMessages(ctx, conversation.ID)
+		if err != nil {
+			p.logger.Warn("Failed to get conversation messages",
+				slog.String("conversation_id", conversation.ID),
+				slog.Any("error", err))
+			messages = nil // Empty messages on error
+		}
+
 		// Add user message
 		messageContext := request.Context
 		if messageContext == nil {
@@ -1263,7 +1263,7 @@ func (p *Processor) ProcessStream(ctx context.Context, request *QueryRequest) (<
 			messageContext["memory"] = enrichedContext.Memory
 		}
 
-		userMessage, err := p.conversationMgr.AddMessage(ctx, conversation.ID, "user", request.Query, messageContext)
+		userMessage, err := p.conversationMgr.AddMessage(ctx, conversation.ID, "user", request.Query)
 		if err != nil {
 			chunkChan <- &StreamChunk{
 				Type:  "error",
@@ -1293,29 +1293,29 @@ func (p *Processor) ProcessStream(ctx context.Context, request *QueryRequest) (<
 		}
 
 		// Build messages for AI
-		messages := []ai.Message{}
-		for _, msg := range conversation.Messages {
-			messages = append(messages, ai.Message{
+		aiMessages := []ai.Message{}
+		for _, msg := range messages {
+			aiMessages = append(aiMessages, ai.Message{
 				Role:    msg.Role,
 				Content: msg.Content,
 			})
 		}
-		messages = append(messages, ai.Message{
+		aiMessages = append(aiMessages, ai.Message{
 			Role:    "user",
 			Content: request.Query,
 		})
 
 		// Create streaming AI request
 		aiRequest := &ai.GenerateStreamRequest{
-			Messages:     messages,
+			Messages:     aiMessages,
 			Model:        model,
 			Temperature:  0.7,
 			MaxTokens:    4000,
 			SystemPrompt: nil, // TODO: Add system prompt based on context
-			Metadata: map[string]interface{}{
-				"conversation_id": conversation.ID,
-				"user_id":         conversation.UserID,
-				"message_id":      userMessage.ID,
+			Metadata: &ai.RequestMetadata{
+				ConversationID: conversation.ID,
+				UserID:         conversation.UserID,
+				RequestID:      userMessage.ID,
 			},
 		}
 
@@ -1366,16 +1366,12 @@ func (p *Processor) ProcessStream(ctx context.Context, request *QueryRequest) (<
 		<-streamResp.Done
 
 		// Store assistant message
+		// TODO: Handle metadata when supported
 		assistantMessage, err := p.conversationMgr.AddMessage(
 			ctx,
 			conversation.ID,
 			"assistant",
 			fullContent.String(),
-			map[string]interface{}{
-				"provider":    provider,
-				"model":       model,
-				"tokens_used": tokensUsed.TotalTokens,
-			},
 		)
 		if err != nil {
 			p.logger.Warn("Failed to store assistant message",

@@ -18,7 +18,12 @@ ORDER BY updated_at DESC;
 UPDATE conversations
 SET title = $2, metadata = $3, updated_at = NOW()
 WHERE id = $1
-RETURNING id, user_id, title, metadata, created_at, updated_at;
+RETURNING id, user_id, title, summary, metadata, is_archived, created_at, updated_at;
+
+-- name: ArchiveConversation :exec
+UPDATE conversations
+SET is_archived = true, updated_at = NOW()
+WHERE id = $1;
 
 -- name: DeleteConversation :exec
 DELETE FROM conversations
@@ -30,14 +35,14 @@ FROM conversations
 WHERE user_id = $1;
 
 -- name: GetRecentConversations :many
-SELECT id, user_id, title, metadata, created_at, updated_at
+SELECT id, user_id, title, summary, metadata, is_archived, created_at, updated_at
 FROM conversations
 WHERE user_id = $1
 ORDER BY updated_at DESC
 LIMIT $2;
 
 -- name: SearchConversations :many
-SELECT id, user_id, title, metadata, created_at, updated_at
+SELECT id, user_id, title, summary, metadata, is_archived, created_at, updated_at
 FROM conversations
 WHERE user_id = $1 
   AND (title ILIKE '%' || $2 || '%' OR metadata::text ILIKE '%' || $2 || '%')

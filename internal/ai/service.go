@@ -1,3 +1,6 @@
+// Package ai provides AI service interfaces and implementations for multiple providers.
+// It includes support for Claude, Gemini, and other AI providers, with a unified interface
+// for text generation, embeddings, and streaming responses.
 package ai
 
 import (
@@ -8,7 +11,7 @@ import (
 
 	"github.com/koopa0/assistant-go/internal/ai/claude"
 	"github.com/koopa0/assistant-go/internal/ai/gemini"
-	"github.com/koopa0/assistant-go/internal/ai/prompts"
+	"github.com/koopa0/assistant-go/internal/ai/prompt"
 	"github.com/koopa0/assistant-go/internal/config"
 )
 
@@ -17,7 +20,7 @@ import (
 type Service struct {
 	claudeClient    *claude.Client
 	geminiClient    *gemini.Client
-	promptService   *prompts.PromptService
+	promptService   *prompt.PromptService
 	defaultProvider string
 	logger          *slog.Logger
 }
@@ -35,7 +38,7 @@ func NewService(cfg *config.Config, logger *slog.Logger) (*Service, error) {
 	svc := &Service{
 		defaultProvider: cfg.AI.DefaultProvider,
 		logger:          logger,
-		promptService:   prompts.NewPromptService(logger),
+		promptService:   prompt.NewPromptService(logger),
 	}
 
 	// Initialize Claude if configured
@@ -113,7 +116,7 @@ func (s *Service) GenerateResponse(ctx context.Context, request *GenerateRequest
 			Temperature:  request.Temperature,
 			Model:        request.Model,
 			SystemPrompt: request.SystemPrompt,
-			Metadata:     request.Metadata,
+			Metadata:     convertRequestMetadataToMap(request.Metadata),
 		}
 		resp, err := s.claudeClient.GenerateResponse(ctx, claudeReq)
 		if err != nil {
@@ -131,7 +134,7 @@ func (s *Service) GenerateResponse(ctx context.Context, request *GenerateRequest
 			Temperature:  request.Temperature,
 			Model:        request.Model,
 			SystemPrompt: request.SystemPrompt,
-			Metadata:     request.Metadata,
+			Metadata:     convertRequestMetadataToMap(request.Metadata),
 		}
 		resp, err := s.geminiClient.GenerateResponse(ctx, geminiReq)
 		if err != nil {
@@ -293,6 +296,60 @@ func (s *Service) getProviderCount() int {
 
 // Conversion functions
 
+func convertRequestMetadataToMap(metadata *RequestMetadata) map[string]interface{} {
+	if metadata == nil {
+		return nil
+	}
+
+	result := make(map[string]interface{})
+	if metadata.RequestID != "" {
+		result["request_id"] = metadata.RequestID
+	}
+	if metadata.UserID != "" {
+		result["user_id"] = metadata.UserID
+	}
+	if metadata.SessionID != "" {
+		result["session_id"] = metadata.SessionID
+	}
+	if metadata.ConversationID != "" {
+		result["conversation_id"] = metadata.ConversationID
+	}
+	if len(metadata.Tags) > 0 {
+		result["tags"] = metadata.Tags
+	}
+	if len(metadata.Features) > 0 {
+		result["features"] = metadata.Features
+	}
+
+	return result
+}
+
+func convertMapToResponseMetadata(data map[string]interface{}) *ResponseMetadata {
+	if data == nil {
+		return nil
+	}
+
+	metadata := &ResponseMetadata{}
+
+	if v, ok := data["processing_time"].(time.Duration); ok {
+		metadata.ProcessingTime = v
+	}
+	if v, ok := data["provider"].(string); ok {
+		metadata.Provider = v
+	}
+	if v, ok := data["model"].(string); ok {
+		metadata.Model = v
+	}
+	if v, ok := data["model_version"].(string); ok {
+		metadata.ModelVersion = v
+	}
+	if v, ok := data["region"].(string); ok {
+		metadata.Region = v
+	}
+
+	return metadata
+}
+
 func convertMessagesToClaude(messages []Message) []claude.Message {
 	claudeMessages := make([]claude.Message, len(messages))
 	for i, msg := range messages {
@@ -324,7 +381,7 @@ func convertClaudeResponse(resp *claude.GenerateResponse) *GenerateResponse {
 		FinishReason: resp.FinishReason,
 		ResponseTime: resp.ResponseTime,
 		RequestID:    resp.RequestID,
-		Metadata:     resp.Metadata,
+		Metadata:     convertMapToResponseMetadata(resp.Metadata),
 	}
 }
 
@@ -337,7 +394,7 @@ func convertGeminiResponse(resp *gemini.GenerateResponse) *GenerateResponse {
 		FinishReason: resp.FinishReason,
 		ResponseTime: resp.ResponseTime,
 		RequestID:    resp.RequestID,
-		Metadata:     resp.Metadata,
+		Metadata:     convertMapToResponseMetadata(resp.Metadata),
 	}
 }
 
@@ -392,7 +449,7 @@ func convertGeminiUsageStats(stats *gemini.UsageStats) *UsageStats {
 }
 
 // ProcessEnhancedQuery processes a user query with intelligent prompt enhancement
-func (s *Service) ProcessEnhancedQuery(ctx context.Context, userQuery string, promptCtx *prompts.PromptContext, providerName ...string) (*EnhancedQueryResponse, error) {
+func (s *Service) ProcessEnhancedQuery(ctx context.Context, userQuery string, promptCtx *prompt.PromptContext, providerName ...string) (*EnhancedQueryResponse, error) {
 	// Enhance the query with intelligent prompts
 	enhanced, err := s.promptService.EnhanceQuery(ctx, userQuery, promptCtx)
 	if err != nil {
@@ -416,12 +473,14 @@ func (s *Service) ProcessEnhancedQuery(ctx context.Context, userQuery string, pr
 		SystemPrompt: &enhanced.SystemPrompt,
 		Temperature:  0.1, // Lower temperature for more consistent technical responses
 		MaxTokens:    4000,
-		Metadata: map[string]interface{}{
-			"task_type":       enhanced.TaskType,
-			"confidence":      enhanced.Confidence,
-			"prompt_template": enhanced.PromptTemplate,
-			"module_path":     promptCtx.ModulePath,
-			"project_type":    promptCtx.ProjectType,
+		Metadata: &RequestMetadata{
+			Features: map[string]string{
+				"task_type":       enhanced.TaskType,
+				"confidence":      fmt.Sprintf("%.2f", enhanced.Confidence),
+				"prompt_template": enhanced.PromptTemplate,
+				"module_path":     promptCtx.ModulePath,
+				"project_type":    promptCtx.ProjectType,
+			},
 		},
 	}
 
@@ -444,17 +503,17 @@ func (s *Service) ProcessEnhancedQuery(ctx context.Context, userQuery string, pr
 }
 
 // GetPromptService returns the prompt service for direct access
-func (s *Service) GetPromptService() *prompts.PromptService {
+func (s *Service) GetPromptService() *prompt.PromptService {
 	return s.promptService
 }
 
 // EnhancedQueryResponse represents the response from an enhanced query
 type EnhancedQueryResponse struct {
-	OriginalQuery  string                 `json:"original_query"`
-	EnhancedQuery  string                 `json:"enhanced_query"`
-	TaskType       string                 `json:"task_type"`
-	Confidence     float64                `json:"confidence"`
-	PromptTemplate string                 `json:"prompt_template"`
-	AIResponse     *GenerateResponse      `json:"ai_response"`
-	Context        *prompts.PromptContext `json:"context"`
+	OriginalQuery  string                `json:"original_query"`
+	EnhancedQuery  string                `json:"enhanced_query"`
+	TaskType       string                `json:"task_type"`
+	Confidence     float64               `json:"confidence"`
+	PromptTemplate string                `json:"prompt_template"`
+	AIResponse     *GenerateResponse     `json:"ai_response"`
+	Context        *prompt.PromptContext `json:"context"`
 }

@@ -263,3 +263,81 @@ func convertQueryContext(data map[string]interface{}) *QueryContext {
 
 	return query
 }
+
+// Stats represents assistant statistics for the status endpoint
+type Stats struct {
+	ConversationCount   int                    `json:"conversation_count"`
+	MessageCount        int                    `json:"message_count"`
+	ToolExecutions      int                    `json:"tool_executions"`
+	AverageResponseTime string                 `json:"average_response_time"`
+	LastActivityTime    string                 `json:"last_activity_time"`
+	ActiveProviders     []string               `json:"active_providers"`
+	ProviderUsage       map[string]interface{} `json:"provider_usage"`
+}
+
+// Tool represents basic tool information
+type Tool struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Category    string                 `json:"category"`
+	Version     string                 `json:"version"`
+	Author      string                 `json:"author"`
+	IsEnabled   bool                   `json:"is_enabled"`
+	Parameters  map[string]interface{} `json:"parameters,omitempty"` // Tool parameters schema
+}
+
+// ToolExecutionRequest represents a request to execute a tool
+type ToolExecutionRequest struct {
+	ToolName string                 `json:"tool_name"`
+	Input    map[string]interface{} `json:"input"`
+	Config   map[string]interface{} `json:"config,omitempty"`
+	Context  *ToolExecutionContext  `json:"context,omitempty"`
+}
+
+// ToolExecutionContext provides context for tool execution
+type ToolExecutionContext struct {
+	UserID         string            `json:"user_id,omitempty"`
+	SessionID      string            `json:"session_id,omitempty"`
+	ConversationID string            `json:"conversation_id,omitempty"`
+	RequestID      string            `json:"request_id,omitempty"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+}
+
+// ToolExecutionResponse represents the response from tool execution
+type ToolExecutionResponse struct {
+	Success       bool                   `json:"success"`
+	Result        interface{}            `json:"result,omitempty"`
+	Error         string                 `json:"error,omitempty"`
+	ExecutionTime time.Duration          `json:"execution_time"`
+	ToolsUsed     []string               `json:"tools_used"`
+	Data          *ToolResultData        `json:"data,omitempty"`
+	Metadata      *ToolExecutionMetadata `json:"metadata,omitempty"`
+}
+
+// ToolResultData contains the actual result data from tool execution
+type ToolResultData struct {
+	Result    interface{}            `json:"result"`
+	Output    map[string]interface{} `json:"output,omitempty"`
+	Artifacts []ToolArtifact         `json:"artifacts,omitempty"`
+}
+
+// ToolArtifact represents a file or artifact produced by a tool
+type ToolArtifact struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Content     []byte `json:"content,omitempty"`
+	Path        string `json:"path,omitempty"`
+	ContentType string `json:"content_type,omitempty"`
+	Size        int64  `json:"size,omitempty"`
+}
+
+// ToolExecutionMetadata contains metadata about tool execution
+type ToolExecutionMetadata struct {
+	StartTime  time.Time              `json:"start_time"`
+	EndTime    time.Time              `json:"end_time"`
+	CPUTime    time.Duration          `json:"cpu_time,omitempty"`
+	MemoryUsed int64                  `json:"memory_used,omitempty"`
+	Custom     map[string]interface{} `json:"custom,omitempty"`
+	Warnings   []string               `json:"warnings,omitempty"`
+	Debug      map[string]interface{} `json:"debug,omitempty"`
+}

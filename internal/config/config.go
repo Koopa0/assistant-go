@@ -34,14 +34,23 @@ type DatabaseConfig struct {
 
 // ServerConfig holds HTTP API server configuration
 type ServerConfig struct {
-	Address         string        `yaml:"address" env:"SERVER_ADDRESS" default:":8080"`
-	ReadTimeout     time.Duration `yaml:"read_timeout" env:"SERVER_READ_TIMEOUT" default:"10s"`
-	WriteTimeout    time.Duration `yaml:"write_timeout" env:"SERVER_WRITE_TIMEOUT" default:"10s"`
-	IdleTimeout     time.Duration `yaml:"idle_timeout" env:"SERVER_IDLE_TIMEOUT" default:"60s"`
-	ShutdownTimeout time.Duration `yaml:"shutdown_timeout" env:"SERVER_SHUTDOWN_TIMEOUT" default:"30s"`
-	EnableTLS       bool          `yaml:"enable_tls" env:"SERVER_ENABLE_TLS" default:"false"`
-	TLSCertFile     string        `yaml:"tls_cert_file" env:"SERVER_TLS_CERT_FILE"`
-	TLSKeyFile      string        `yaml:"tls_key_file" env:"SERVER_TLS_KEY_FILE"`
+	Address         string          `yaml:"address" env:"SERVER_ADDRESS" default:":8080"`
+	ReadTimeout     time.Duration   `yaml:"read_timeout" env:"SERVER_READ_TIMEOUT" default:"10s"`
+	WriteTimeout    time.Duration   `yaml:"write_timeout" env:"SERVER_WRITE_TIMEOUT" default:"10s"`
+	IdleTimeout     time.Duration   `yaml:"idle_timeout" env:"SERVER_IDLE_TIMEOUT" default:"60s"`
+	ShutdownTimeout time.Duration   `yaml:"shutdown_timeout" env:"SERVER_SHUTDOWN_TIMEOUT" default:"30s"`
+	EnableTLS       bool            `yaml:"enable_tls" env:"SERVER_ENABLE_TLS" default:"false"`
+	TLSCertFile     string          `yaml:"tls_cert_file" env:"SERVER_TLS_CERT_FILE"`
+	TLSKeyFile      string          `yaml:"tls_key_file" env:"SERVER_TLS_KEY_FILE"`
+	Security        SecurityConfig  `yaml:"security"`
+	RateLimit       RateLimitConfig `yaml:"rate_limit"`
+}
+
+// RateLimitConfig holds rate limiting configuration
+type RateLimitConfig struct {
+	Enabled           bool `yaml:"enabled" env:"RATE_LIMIT_ENABLED" default:"true"`
+	RequestsPerSecond int  `yaml:"requests_per_second" env:"RATE_LIMIT_RPS" default:"10"`
+	BurstSize         int  `yaml:"burst_size" env:"RATE_LIMIT_BURST" default:"20"`
 }
 
 // CLIConfig holds CLI-specific configuration

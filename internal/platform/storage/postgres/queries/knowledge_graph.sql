@@ -24,21 +24,24 @@ DO UPDATE SET
     embedding = COALESCE($7, knowledge_nodes.embedding),
     importance = COALESCE($8, knowledge_nodes.importance),
     updated_at = NOW()
-RETURNING *;
+RETURNING id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active;
 
 -- name: GetKnowledgeNode :one
-SELECT * FROM knowledge_nodes
+SELECT id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active
+FROM knowledge_nodes
 WHERE id = $1;
 
 -- name: GetKnowledgeNodeByName :one
-SELECT * FROM knowledge_nodes
+SELECT id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active
+FROM knowledge_nodes
 WHERE user_id = $1::uuid
   AND node_type = $2
   AND node_name = $3
   AND is_active = true;
 
 -- name: GetKnowledgeNodes :many
-SELECT * FROM knowledge_nodes
+SELECT id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active
+FROM knowledge_nodes
 WHERE user_id = $1::uuid
   AND (node_type = ANY($2::text[]) OR $2 IS NULL)
   AND is_active = true
@@ -46,7 +49,8 @@ ORDER BY importance DESC, access_frequency DESC
 LIMIT $3 OFFSET $4;
 
 -- name: SearchKnowledgeNodesByName :many
-SELECT * FROM knowledge_nodes
+SELECT id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active
+FROM knowledge_nodes
 WHERE user_id = $1::uuid
   AND to_tsvector('english', node_name || ' ' || COALESCE(display_name, '') || ' ' || COALESCE(description, '')) 
       @@ plainto_tsquery('english', $2)
@@ -75,14 +79,14 @@ SET access_frequency = access_frequency + 1,
     last_accessed = NOW(),
     updated_at = NOW()
 WHERE id = $1
-RETURNING *;
+RETURNING id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active;
 
 -- name: UpdateKnowledgeNodeProperties :one
 UPDATE knowledge_nodes
 SET properties = properties || $2,
     updated_at = NOW()
 WHERE id = $1
-RETURNING *;
+RETURNING id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active;
 
 -- name: DeactivateKnowledgeNode :exec
 UPDATE knowledge_nodes
@@ -91,7 +95,8 @@ SET is_active = false,
 WHERE id = $1;
 
 -- name: GetNodesByImportance :many
-SELECT * FROM knowledge_nodes
+SELECT id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active
+FROM knowledge_nodes
 WHERE user_id = $1::uuid
   AND importance >= $2
   AND is_active = true
@@ -120,10 +125,11 @@ DO UPDATE SET
     evidence_count = knowledge_edges.evidence_count + COALESCE($7, 1),
     last_observed = NOW(),
     updated_at = NOW()
-RETURNING *;
+RETURNING id, user_id, source_node_id, target_node_id, edge_type, strength, properties, evidence_count, last_observed, created_at, updated_at, is_active;
 
 -- name: GetKnowledgeEdge :one
-SELECT * FROM knowledge_edges
+SELECT id, user_id, source_node_id, target_node_id, edge_type, strength, properties, evidence_count, last_observed, created_at, updated_at, is_active
+FROM knowledge_edges
 WHERE id = $1;
 
 -- name: GetKnowledgeEdges :many
@@ -181,14 +187,14 @@ SET strength = $2,
     last_observed = NOW(),
     updated_at = NOW()
 WHERE id = $1
-RETURNING *;
+RETURNING id, user_id, source_node_id, target_node_id, edge_type, strength, properties, evidence_count, last_observed, created_at, updated_at, is_active;
 
 -- name: WeakenKnowledgeEdge :one
 UPDATE knowledge_edges
 SET strength = strength * $2,
     updated_at = NOW()
 WHERE id = $1
-RETURNING *;
+RETURNING id, user_id, source_node_id, target_node_id, edge_type, strength, properties, evidence_count, last_observed, created_at, updated_at, is_active;
 
 -- name: DeactivateKnowledgeEdge :exec
 UPDATE knowledge_edges
@@ -236,10 +242,11 @@ INSERT INTO knowledge_evolution (
     confidence
 ) VALUES (
     $1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8
-) RETURNING *;
+) RETURNING id, user_id, entity_type, entity_id, change_type, previous_state, new_state, change_reason, confidence, created_at;
 
 -- name: GetKnowledgeEvolution :many
-SELECT * FROM knowledge_evolution
+SELECT id, user_id, entity_type, entity_id, change_type, previous_state, new_state, change_reason, confidence, created_at
+FROM knowledge_evolution
 WHERE user_id = $1::uuid
   AND (entity_type = $2 OR $2 IS NULL)
   AND (entity_id = $3::uuid OR $3 IS NULL)
@@ -247,7 +254,8 @@ ORDER BY created_at DESC
 LIMIT $4 OFFSET $5;
 
 -- name: GetEntityEvolutionHistory :many
-SELECT * FROM knowledge_evolution
+SELECT id, user_id, entity_type, entity_id, change_type, previous_state, new_state, change_reason, confidence, created_at
+FROM knowledge_evolution
 WHERE entity_id = $1::uuid
 ORDER BY created_at ASC;
 

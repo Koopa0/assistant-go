@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/koopa0/assistant-go/internal/platform/observability"
+	"github.com/koopa0/assistant-go/internal/platform/server/middleware"
 )
 
 // requestIDMiddleware adds a unique request ID to each request
@@ -119,6 +120,21 @@ func (s *Server) recoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// rateLimitMiddleware applies rate limiting to requests
+func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
+	// Initialize rate limiter if not already done
+	if s.rateLimiter == nil {
+		s.initRateLimiter()
+	}
+
+	// Skip rate limiting if not configured
+	if s.rateLimiter == nil {
+		return next
+	}
+
+	return s.rateLimiter.Handler(next)
+}
+
 // responseWriter wraps http.ResponseWriter to capture status code and bytes written
 type responseWriter struct {
 	http.ResponseWriter
@@ -187,4 +203,52 @@ func (s *Server) writeErrorResponse(w http.ResponseWriter, statusCode int, messa
 		"error":     message,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	})
+}
+
+// initRateLimiter initializes the rate limiter based on configuration
+func (s *Server) initRateLimiter() {
+	// Check if rate limiting is enabled in config
+	if !s.config.RateLimit.Enabled {
+		s.logger.Info("Rate limiting is disabled")
+		return
+	}
+
+	// Default configuration
+	rateLimitConfig := middleware.RateLimitConfig{
+		RequestsPerSecond: 10, // Default: 10 requests per second
+		BurstSize:         20, // Default: burst of 20
+		UseIPBased:        true,
+		EndpointLimits:    make(map[string]middleware.EndpointLimit),
+	}
+
+	// Override with config values if available
+	if s.config.RateLimit.RequestsPerSecond > 0 {
+		rateLimitConfig.RequestsPerSecond = s.config.RateLimit.RequestsPerSecond
+	}
+	if s.config.RateLimit.BurstSize > 0 {
+		rateLimitConfig.BurstSize = s.config.RateLimit.BurstSize
+	}
+
+	// Configure endpoint-specific limits
+	// High-cost endpoints
+	rateLimitConfig.EndpointLimits["/api/v1/chat"] = middleware.EndpointLimit{
+		RequestsPerMinute: 30,
+		BurstSize:         5,
+	}
+	rateLimitConfig.EndpointLimits["/api/v1/langchain"] = middleware.EndpointLimit{
+		RequestsPerMinute: 20,
+		BurstSize:         3,
+	}
+	rateLimitConfig.EndpointLimits["/api/v1/tools"] = middleware.EndpointLimit{
+		RequestsPerMinute: 60,
+		BurstSize:         10,
+	}
+
+	// Initialize the rate limiter
+	s.rateLimiter = middleware.NewRateLimitMiddleware(rateLimitConfig, s.logger)
+
+	s.logger.Info("Rate limiter initialized",
+		slog.Int("requests_per_second", rateLimitConfig.RequestsPerSecond),
+		slog.Int("burst_size", rateLimitConfig.BurstSize),
+		slog.Int("endpoint_limits", len(rateLimitConfig.EndpointLimits)))
 }

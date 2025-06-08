@@ -27,13 +27,13 @@ type StreamResponse struct {
 
 // GenerateStreamRequest represents a request for streaming generation
 type GenerateStreamRequest struct {
-	Messages     []Message              `json:"messages"`
-	MaxTokens    int                    `json:"max_tokens,omitempty"`
-	Temperature  float64                `json:"temperature,omitempty"`
-	Model        string                 `json:"model,omitempty"`
-	SystemPrompt *string                `json:"system_prompt,omitempty"`
-	Tools        []Tool                 `json:"tools,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	Messages     []Message        `json:"messages"`
+	MaxTokens    int              `json:"max_tokens,omitempty"`
+	Temperature  float64          `json:"temperature,omitempty"`
+	Model        string           `json:"model,omitempty"`
+	SystemPrompt *string          `json:"system_prompt,omitempty"`
+	Tools        []Tool           `json:"tools,omitempty"`
+	Metadata     *RequestMetadata `json:"metadata,omitempty"`
 }
 
 // StreamCallback is a callback function for streaming responses
@@ -96,7 +96,7 @@ func (s *Service) streamFromClaude(ctx context.Context, request *GenerateStreamR
 		Temperature:  request.Temperature,
 		Model:        request.Model,
 		SystemPrompt: request.SystemPrompt,
-		Metadata:     request.Metadata,
+		Metadata:     convertRequestMetadataToMap(request.Metadata),
 	}
 
 	// Start timing

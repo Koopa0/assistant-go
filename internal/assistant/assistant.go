@@ -8,16 +8,14 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/tmc/langchaingo/llms"
-
 	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/core/conversation"
+	"github.com/koopa0/assistant-go/internal/conversation"
 	"github.com/koopa0/assistant-go/internal/langchain"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
-	"github.com/koopa0/assistant-go/internal/tools"
-	"github.com/koopa0/assistant-go/internal/tools/docker"
-	"github.com/koopa0/assistant-go/internal/tools/godev"
-	postgrestool "github.com/koopa0/assistant-go/internal/tools/postgres"
+	"github.com/koopa0/assistant-go/internal/tool"
+	"github.com/koopa0/assistant-go/internal/tool/docker"
+	"github.com/koopa0/assistant-go/internal/tool/godev"
+	postgrestool "github.com/koopa0/assistant-go/internal/tool/postgres"
 )
 
 // Assistant is the core orchestrator of the intelligent development companion.
@@ -34,13 +32,13 @@ import (
 // - Health monitoring of all subsystems
 // - Graceful shutdown and resource cleanup
 type Assistant struct {
-	config           *config.Config        // Application configuration
-	db               postgres.DB           // Database client for persistence
-	logger           *slog.Logger          // Structured logger
-	registry         *tools.Registry       // Tool registry for available tools
-	processor        *Processor            // Request processing pipeline
-	conversationMgr  *conversation.Manager // Conversation manager
-	langchainService *langchain.Service    // LangChain integration service
+	config           *config.Config                   // Application configuration
+	db               postgres.DB                      // Database client for persistence
+	logger           *slog.Logger                     // Structured logger
+	registry         *tool.Registry                   // Tool registry for available tools
+	processor        *Processor                       // Request processing pipeline
+	conversationMgr  conversation.ConversationService // Conversation service
+	langchainService *langchain.Service               // LangChain integration service
 }
 
 // QueryRequest represents a comprehensive query request to the Assistant.
@@ -142,13 +140,10 @@ func New(ctx context.Context, cfg *config.Config, db postgres.DB, logger *slog.L
 	}
 
 	// Initialize tool registry
-	registry := tools.NewRegistry(logger)
+	registry := tool.NewRegistry(logger)
 
-	// Initialize context manager
-	conversationMgr, err := conversation.NewManager(db, logger)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize context manager: %w", err)
-	}
+	// Initialize conversation service using factory function
+	conversationMgr := conversation.NewConversationSystem(db.GetQueries(), logger)
 
 	// Initialize processor
 	processor, err := NewProcessor(cfg, db, registry, logger)
@@ -160,24 +155,15 @@ func New(ctx context.Context, cfg *config.Config, db postgres.DB, logger *slog.L
 	var langchainService *langchain.Service
 	if cfg.Tools.LangChain.EnableMemory {
 		// Try to create a working LangChain service
-		langchainCfg := langchain.ServiceConfig{
-			Config:       cfg.Tools.LangChain,
-			Logger:       logger,
-			DBClient:     nil,                         // TODO: Convert postgres.ClientInterface to *postgres.SQLCClient when needed
-			LLMProviders: make(map[string]llms.Model), // Correct type for LLM providers
+		// Create a simple LangChain client first
+		langchainClient := &langchain.LangChainClient{
+			// Will be nil for now - requires LLM setup
 		}
 
 		// Note: LangChain service creation might fail due to missing dependencies
 		// This is expected in demo mode or when LangChain dependencies are not fully configured
-		langchainService, err = langchain.NewService(langchainCfg)
-		if err != nil {
-			logger.Warn("Failed to initialize LangChain service (this is expected in demo mode)",
-				slog.Any("error", err))
-			// Don't return error - LangChain is optional
-			langchainService = nil
-		} else {
-			logger.Info("LangChain service initialized successfully")
-		}
+		langchainService = langchain.NewService(langchainClient, logger, db.GetQueries())
+		logger.Info("LangChain service initialized (limited functionality without LLM)")
 	}
 
 	assistant := &Assistant{
@@ -286,9 +272,16 @@ func (a *Assistant) GetConversation(ctx context.Context, conversationID string) 
 	return a.conversationMgr.GetConversation(ctx, conversationID)
 }
 
+// GetConversationMessages retrieves messages for a conversation
+func (a *Assistant) GetConversationMessages(ctx context.Context, conversationID string) ([]*conversation.Message, error) {
+	return a.conversationMgr.GetMessages(ctx, conversationID)
+}
+
 // ListConversations lists conversations for a user
 func (a *Assistant) ListConversations(ctx context.Context, userID string, limit, offset int) ([]*conversation.Conversation, error) {
-	return a.conversationMgr.ListConversations(ctx, userID, limit, offset)
+	// Note: Current implementation doesn't support pagination
+	// TODO: Add pagination support to conversation manager
+	return a.conversationMgr.ListConversations(ctx, userID)
 }
 
 // DeleteConversation deletes a conversation
@@ -297,13 +290,67 @@ func (a *Assistant) DeleteConversation(ctx context.Context, conversationID strin
 }
 
 // GetAvailableTools returns a list of available tools
-func (a *Assistant) GetAvailableTools() []tools.ToolInfo {
-	return a.registry.ListTools()
+func (a *Assistant) GetAvailableTools() []Tool {
+	toolInfos := a.registry.ListTools()
+	tools := make([]Tool, 0, len(toolInfos))
+	for _, info := range toolInfos {
+		// Convert tool info to Tool struct
+		t := Tool{
+			Name:        info.Name,
+			Description: info.Description,
+			Category:    info.Category,
+			Version:     info.Version,
+			Author:      info.Author,
+			IsEnabled:   info.IsEnabled,
+		}
+
+		// Convert Parameters if available
+		if info.Parameters != nil {
+			// Convert to map[string]interface{} for the API
+			params := make(map[string]interface{})
+			if info.Parameters.Properties != nil {
+				for k, v := range info.Parameters.Properties {
+					paramInfo := map[string]interface{}{
+						"type":        v.Type,
+						"description": v.Description,
+					}
+					if v.Default != nil {
+						paramInfo["default"] = v.Default
+					}
+					if len(v.Enum) > 0 {
+						paramInfo["enum"] = v.Enum
+					}
+					params[k] = paramInfo
+				}
+			}
+			t.Parameters = params
+		}
+
+		tools = append(tools, t)
+	}
+	return tools
 }
 
 // GetToolInfo returns information about a specific tool
-func (a *Assistant) GetToolInfo(toolName string) (*tools.ToolInfo, error) {
+func (a *Assistant) GetToolInfo(toolName string) (*tool.ToolInfo, error) {
 	return a.registry.GetToolInfo(toolName)
+}
+
+// Health performs comprehensive health checks on all subsystems.
+// It verifies:
+// - Database connectivity and operations
+// - Tool registry functionality
+// - Processor pipeline health
+//
+// This method is suitable for use as a health check endpoint.
+//
+// Returns:
+//   - error: nil if all systems are healthy, error with details otherwise
+//
+// HealthCheck performs a health check and returns status
+// This implements the HealthChecker interface
+func (a *Assistant) HealthCheck(ctx context.Context) error {
+	return a.Health(ctx)
 }
 
 // Health performs comprehensive health checks on all subsystems.
@@ -349,10 +396,7 @@ func (a *Assistant) Close(ctx context.Context) error {
 		a.logger.Error("Failed to close processor", slog.Any("error", err))
 	}
 
-	// Close context manager
-	if err := a.conversationMgr.Close(ctx); err != nil {
-		a.logger.Error("Failed to close context manager", slog.Any("error", err))
-	}
+	// Note: conversation manager doesn't require explicit close
 
 	// Close tool registry
 	if err := a.registry.Close(ctx); err != nil {
@@ -365,10 +409,10 @@ func (a *Assistant) Close(ctx context.Context) error {
 
 // registerBuiltinTools registers the built-in tools
 func (a *Assistant) registerBuiltinTools(ctx context.Context) error {
-	a.logger.Debug("Registering built-in tools...")
+	a.logger.Debug("Registering built-in tool...")
 
 	// Register Go development tool factory
-	godevFactory := func(cfg *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
+	godevFactory := func(cfg *tool.ToolConfig, logger *slog.Logger) (tool.Tool, error) {
 		return godev.NewGoDevTool(logger), nil
 	}
 	if err := a.registry.Register("godev", godevFactory); err != nil {
@@ -376,7 +420,7 @@ func (a *Assistant) registerBuiltinTools(ctx context.Context) error {
 	}
 
 	// Register Docker tool factory
-	dockerFactory := func(cfg *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
+	dockerFactory := func(cfg *tool.ToolConfig, logger *slog.Logger) (tool.Tool, error) {
 		return docker.NewDockerTool(logger), nil
 	}
 	if err := a.registry.Register("docker", dockerFactory); err != nil {
@@ -384,7 +428,7 @@ func (a *Assistant) registerBuiltinTools(ctx context.Context) error {
 	}
 
 	// Register PostgreSQL tool factory
-	postgresFactory := func(cfg *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
+	postgresFactory := func(cfg *tool.ToolConfig, logger *slog.Logger) (tool.Tool, error) {
 		return postgrestool.NewPostgresTool(logger), nil
 	}
 	if err := a.registry.Register("postgres", postgresFactory); err != nil {
@@ -448,6 +492,38 @@ type ToolRegistryStats struct {
 
 	// AverageExecutionTimes maps tool names to their average execution times in milliseconds
 	AverageExecutionTimes map[string]int64 `json:"average_execution_times_ms,omitempty"`
+}
+
+// GetStats returns current statistics
+// This implements the StatsProvider interface
+func (a *Assistant) GetStats(ctx context.Context) (*Stats, error) {
+	// Get detailed stats first
+	detailedStats, err := a.Stats(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert to simplified Stats for the interface
+	stats := &Stats{
+		ConversationCount:   0,     // TODO: Get from conversation manager
+		MessageCount:        0,     // TODO: Get from conversation manager
+		ToolExecutions:      0,     // TODO: Get from processor stats
+		AverageResponseTime: "0ms", // TODO: Calculate from processor stats
+		LastActivityTime:    time.Now().Format(time.RFC3339),
+		ActiveProviders:     []string{a.config.AI.DefaultProvider},
+		ProviderUsage:       make(map[string]interface{}),
+	}
+
+	// Add tool execution counts if available
+	if detailedStats.Tools != nil && detailedStats.Tools.ExecutionCounts != nil {
+		totalExecutions := int64(0)
+		for _, count := range detailedStats.Tools.ExecutionCounts {
+			totalExecutions += count
+		}
+		stats.ToolExecutions = int(totalExecutions)
+	}
+
+	return stats, nil
 }
 
 // Stats returns assistant statistics
@@ -516,19 +592,7 @@ func (a *Assistant) Stats(ctx context.Context) (*AssistantStats, error) {
 	return stats, nil
 }
 
-// ToolExecutionRequest represents a request to execute a tool
-type ToolExecutionRequest struct {
-	// ToolName is the name of the tool to execute
-	ToolName string `json:"tool_name"`
-
-	// Input contains tool-specific input parameters
-	// TODO: Replace with tool-specific typed inputs when tools are refactored
-	Input map[string]any `json:"input"`
-
-	// Config contains tool-specific configuration
-	// TODO: Replace with tool-specific typed config when tools are refactored
-	Config map[string]any `json:"config,omitempty"`
-}
+// ToolExecutionRequest is now defined in types.go
 
 // ExecuteTool provides direct access to tool execution without going through
 // the full query processing pipeline. This is useful for:
@@ -541,9 +605,9 @@ type ToolExecutionRequest struct {
 //   - req: Tool execution request with name, input, and config
 //
 // Returns:
-//   - *tools.ToolResult: Tool execution results
+//   - *tool.ToolResult: Tool execution results
 //   - error: Execution error if any
-func (a *Assistant) ExecuteTool(ctx context.Context, req *ToolExecutionRequest) (*tools.ToolResult, error) {
+func (a *Assistant) ExecuteTool(ctx context.Context, req *ToolExecutionRequest) (*ToolExecutionResponse, error) {
 	if req == nil {
 		return nil, NewAssistantInvalidInputError("request is required", req)
 	}
@@ -557,14 +621,14 @@ func (a *Assistant) ExecuteTool(ctx context.Context, req *ToolExecutionRequest) 
 		slog.Any("input", req.Input))
 
 	// Convert legacy input and config to typed structures
-	toolInput := &tools.ToolInput{
+	toolInput := &tool.ToolInput{
 		Parameters: req.Input,
 	}
 
-	toolConfig := &tools.ToolConfig{}
+	toolConfig := &tool.ToolConfig{}
 	if req.Config != nil {
 		// Convert config map to ToolConfig
-		toolConfig = tools.ConvertLegacyConfig(req.Config)
+		toolConfig = tool.ConvertLegacyConfig(req.Config)
 	}
 
 	result, err := a.registry.Execute(ctx, req.ToolName, toolInput, toolConfig)
@@ -580,7 +644,55 @@ func (a *Assistant) ExecuteTool(ctx context.Context, req *ToolExecutionRequest) 
 		slog.Bool("success", result.Success),
 		slog.Duration("execution_time", result.ExecutionTime))
 
-	return result, nil
+	// Convert tool.ToolResult to ToolExecutionResponse
+	executionResp := &ToolExecutionResponse{
+		Success:       result.Success,
+		Error:         result.Error,
+		ExecutionTime: result.ExecutionTime,
+		ToolsUsed:     []string{req.ToolName},
+	}
+
+	// Convert result data if present
+	if result.Data != nil {
+		executionResp.Data = &ToolResultData{
+			Result: result.Data.Result,
+			Output: result.Data.Output,
+		}
+		// Convert artifacts
+		if len(result.Data.Artifacts) > 0 {
+			executionResp.Data.Artifacts = make([]ToolArtifact, 0, len(result.Data.Artifacts))
+			for _, artifact := range result.Data.Artifacts {
+				executionResp.Data.Artifacts = append(executionResp.Data.Artifacts, ToolArtifact{
+					Name:        artifact.Name,
+					Type:        artifact.Type,
+					Content:     artifact.Content,
+					Path:        artifact.Path,
+					ContentType: artifact.ContentType,
+					Size:        artifact.Size,
+				})
+			}
+		}
+	}
+
+	// Convert metadata if present
+	if result.Metadata != nil {
+		executionResp.Metadata = &ToolExecutionMetadata{
+			StartTime:  result.Metadata.StartTime,
+			EndTime:    result.Metadata.EndTime,
+			CPUTime:    result.Metadata.CPUTime,
+			MemoryUsed: result.Metadata.MemoryUsed,
+			Custom:     result.Metadata.Custom,
+			Warnings:   result.Metadata.Warnings,
+			Debug:      result.Metadata.Debug,
+		}
+	}
+
+	// Set result interface{} for compatibility
+	if result.Data != nil {
+		executionResp.Result = result.Data.Result
+	}
+
+	return executionResp, nil
 }
 
 // GetLangChainService returns the LangChain service instance if available

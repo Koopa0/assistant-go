@@ -13,14 +13,16 @@ INSERT INTO development_sessions (
     started_at
 ) VALUES (
     $1::uuid, $2, $3, $4, COALESCE($5, NOW())
-) RETURNING *;
+) RETURNING id, user_id, session_type, project_context, goals, actual_outcomes, interruption_count, focus_score, productivity_metrics, mood_indicators, started_at, ended_at, total_duration_minutes;
 
 -- name: GetDevelopmentSession :one
-SELECT * FROM development_sessions
+SELECT id, user_id, session_type, project_context, goals, actual_outcomes, interruption_count, focus_score, productivity_metrics, mood_indicators, started_at, ended_at, total_duration_minutes
+FROM development_sessions
 WHERE id = $1;
 
 -- name: GetDevelopmentSessions :many
-SELECT * FROM development_sessions
+SELECT id, user_id, session_type, project_context, goals, actual_outcomes, interruption_count, focus_score, productivity_metrics, mood_indicators, started_at, ended_at, total_duration_minutes
+FROM development_sessions
 WHERE user_id = $1::uuid
   AND (session_type = $2 OR $2 IS NULL)
   AND started_at >= COALESCE($3, NOW() - INTERVAL '30 days')
@@ -28,7 +30,8 @@ ORDER BY started_at DESC
 LIMIT $4 OFFSET $5;
 
 -- name: GetActiveSessions :many
-SELECT * FROM development_sessions
+SELECT id, user_id, session_type, project_context, goals, actual_outcomes, interruption_count, focus_score, productivity_metrics, mood_indicators, started_at, ended_at, total_duration_minutes
+FROM development_sessions
 WHERE user_id = $1::uuid
   AND ended_at IS NULL
 ORDER BY started_at DESC;
@@ -40,7 +43,7 @@ SET actual_outcomes = $2,
     productivity_metrics = $4,
     mood_indicators = $5
 WHERE id = $1
-RETURNING *;
+RETURNING id, user_id, session_type, project_context, goals, actual_outcomes, interruption_count, focus_score, productivity_metrics, mood_indicators, started_at, ended_at, total_duration_minutes;
 
 -- name: EndDevelopmentSession :one
 UPDATE development_sessions
@@ -51,7 +54,7 @@ SET ended_at = COALESCE($2, NOW()),
         ELSE 1.0
     END
 WHERE id = $1
-RETURNING *;
+RETURNING id, user_id, session_type, project_context, goals, actual_outcomes, interruption_count, focus_score, productivity_metrics, mood_indicators, started_at, ended_at, total_duration_minutes;
 
 -- name: GetSessionStatistics :one
 SELECT 
@@ -106,21 +109,24 @@ DO UPDATE SET
     frequency = code_patterns.frequency + 1,
     last_used = NOW(),
     updated_at = NOW()
-RETURNING *;
+RETURNING id, user_id, pattern_category, pattern_name, pattern_ast, usage_contexts, frequency, last_used, evolution_history, quality_score, created_at, updated_at;
 
 -- name: GetCodePattern :one
-SELECT * FROM code_patterns
+SELECT id, user_id, pattern_category, pattern_name, pattern_ast, usage_contexts, frequency, last_used, evolution_history, quality_score, created_at, updated_at
+FROM code_patterns
 WHERE id = $1;
 
 -- name: GetCodePatterns :many
-SELECT * FROM code_patterns
+SELECT id, user_id, pattern_category, pattern_name, pattern_ast, usage_contexts, frequency, last_used, evolution_history, quality_score, created_at, updated_at
+FROM code_patterns
 WHERE user_id = $1::uuid
   AND (pattern_category = $2 OR $2 IS NULL)
 ORDER BY frequency DESC, last_used DESC
 LIMIT $3 OFFSET $4;
 
 -- name: SearchCodePatterns :many
-SELECT * FROM code_patterns
+SELECT id, user_id, pattern_category, pattern_name, pattern_ast, usage_contexts, frequency, last_used, evolution_history, quality_score, created_at, updated_at
+FROM code_patterns
 WHERE user_id = $1::uuid
   AND (pattern_name ILIKE '%' || $2 || '%' OR $2 = ANY(usage_contexts))
 ORDER BY frequency DESC, last_used DESC

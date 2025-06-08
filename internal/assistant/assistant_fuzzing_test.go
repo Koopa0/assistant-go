@@ -10,7 +10,7 @@ import (
 	customerrors "github.com/koopa0/assistant-go/internal/errors"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
 	"github.com/koopa0/assistant-go/internal/testutil"
-	"github.com/koopa0/assistant-go/internal/tools"
+	"github.com/koopa0/assistant-go/internal/tool"
 )
 
 // FuzzQueryRequestValidation tests query request validation with fuzzing
@@ -43,7 +43,7 @@ func FuzzQueryRequestValidation(f *testing.F) {
 			},
 		}
 		mockDB := postgres.NewMockClient(testutil.NewSilentLogger())
-		registry := tools.NewRegistry(testutil.NewTestLogger())
+		registry := tool.NewRegistry(testutil.NewTestLogger())
 		logger := testutil.NewTestLogger()
 
 		processor, err := NewProcessor(cfg, mockDB, registry, logger)

@@ -1,3 +1,6 @@
+// Package cli provides the command-line interface for the assistant.
+// It includes interactive mode with rich UI elements, direct query mode,
+// streaming response handling, and integration with the assistant core functionality.
 package cli
 
 import (

@@ -13,7 +13,7 @@ import (
 	"github.com/koopa0/assistant-go/internal/config"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
 	"github.com/koopa0/assistant-go/internal/testutil"
-	"github.com/koopa0/assistant-go/internal/tools"
+	"github.com/koopa0/assistant-go/internal/tool"
 )
 
 // TestProcessQueryRequestAdvanced tests complex scenarios in ProcessQueryRequest
@@ -284,7 +284,7 @@ func TestExecuteToolAdvanced(t *testing.T) {
 		setupFunc     func() (*Assistant, func())
 		expectError   bool
 		errorContains string
-		validateFunc  func(*testing.T, *tools.ToolResult)
+		validateFunc  func(*testing.T, *ToolExecutionResponse)
 	}{
 		{
 			name:          "nil_request",
@@ -379,7 +379,7 @@ func TestExecuteToolAdvanced(t *testing.T) {
 				}
 			},
 			expectError: false,
-			validateFunc: func(t *testing.T, result *tools.ToolResult) {
+			validateFunc: func(t *testing.T, result *ToolExecutionResponse) {
 				if result == nil || !result.Success {
 					t.Error("Expected successful tool execution")
 				}
@@ -620,17 +620,17 @@ func TestExecutionTimeoutHandling(t *testing.T) {
 	// Register a slow tool
 	slowTool := &mockTool{
 		name: "slow_tool",
-		executeFunc: func(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+		executeFunc: func(ctx context.Context, input map[string]interface{}) (*tool.ToolResult, error) {
 			select {
 			case <-time.After(5 * time.Second):
-				return &tools.ToolResult{Success: true}, nil
+				return &tool.ToolResult{Success: true}, nil
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			}
 		},
 	}
 
-	_ = assistant.registry.Register("slow_tool", func(cfg *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
+	_ = assistant.registry.Register("slow_tool", func(cfg *tool.ToolConfig, logger *slog.Logger) (tool.Tool, error) {
 		return slowTool, nil
 	})
 
@@ -677,12 +677,12 @@ func TestRecoveryFromPanics(t *testing.T) {
 	// Register a panicking tool
 	panicTool := &mockTool{
 		name: "panic_tool",
-		executeFunc: func(ctx context.Context, input map[string]interface{}) (*tools.ToolResult, error) {
+		executeFunc: func(ctx context.Context, input map[string]interface{}) (*tool.ToolResult, error) {
 			panic("intentional panic for testing")
 		},
 	}
 
-	_ = assistant.registry.Register("panic_tool", func(cfg *tools.ToolConfig, logger *slog.Logger) (tools.Tool, error) {
+	_ = assistant.registry.Register("panic_tool", func(cfg *tool.ToolConfig, logger *slog.Logger) (tool.Tool, error) {
 		return panicTool, nil
 	})
 
@@ -715,11 +715,11 @@ func (f *failingMockDB) GetPoolStats() *postgres.PoolStats {
 }
 
 type failingRegistry struct {
-	*tools.Registry
+	*tool.Registry
 	failOnPattern string
 }
 
-func (f *failingRegistry) Register(name string, factory tools.ToolFactory) error {
+func (f *failingRegistry) Register(name string, factory tool.ToolFactory) error {
 	if contains(name, f.failOnPattern) {
 		return fmt.Errorf("intentional registration failure for %s", name)
 	}
@@ -728,19 +728,19 @@ func (f *failingRegistry) Register(name string, factory tools.ToolFactory) error
 
 type mockTool struct {
 	name        string
-	executeFunc func(context.Context, map[string]interface{}) (*tools.ToolResult, error)
+	executeFunc func(context.Context, map[string]interface{}) (*tool.ToolResult, error)
 }
 
 func (m *mockTool) Name() string        { return m.name }
 func (m *mockTool) Description() string { return "Mock tool for testing" }
-func (m *mockTool) Parameters() *tools.ToolParametersSchema {
-	return &tools.ToolParametersSchema{
+func (m *mockTool) Parameters() *tool.ToolParametersSchema {
+	return &tool.ToolParametersSchema{
 		Type:       "object",
-		Properties: make(map[string]tools.ToolParameter),
+		Properties: make(map[string]tool.ParameterProperty),
 		Required:   []string{},
 	}
 }
-func (m *mockTool) Execute(ctx context.Context, input *tools.ToolInput) (*tools.ToolResult, error) {
+func (m *mockTool) Execute(ctx context.Context, input *tool.ToolInput) (*tool.ToolResult, error) {
 	if m.executeFunc != nil {
 		// Convert new input format to legacy format for the mock function
 		legacyInput := input.Parameters
@@ -749,27 +749,27 @@ func (m *mockTool) Execute(ctx context.Context, input *tools.ToolInput) (*tools.
 		}
 		return m.executeFunc(ctx, legacyInput)
 	}
-	return &tools.ToolResult{Success: true}, nil
+	return &tool.ToolResult{Success: true}, nil
 }
 func (m *mockTool) Health(ctx context.Context) error { return nil }
 func (m *mockTool) Close(ctx context.Context) error  { return nil }
 
-// mockToolAdvanced implements tools.Tool interface completely
+// mockToolAdvanced implements tool.Tool interface completely
 type mockToolAdvanced struct {
 	name        string
-	executeFunc func(context.Context, map[string]interface{}) (*tools.ToolResult, error)
+	executeFunc func(context.Context, map[string]interface{}) (*tool.ToolResult, error)
 }
 
 func (m *mockToolAdvanced) Name() string        { return m.name }
 func (m *mockToolAdvanced) Description() string { return "Mock tool for testing" }
-func (m *mockToolAdvanced) Parameters() *tools.ToolParametersSchema {
-	return &tools.ToolParametersSchema{
+func (m *mockToolAdvanced) Parameters() *tool.ToolParametersSchema {
+	return &tool.ToolParametersSchema{
 		Type:       "object",
-		Properties: make(map[string]tools.ToolParameter),
+		Properties: make(map[string]tool.ParameterProperty),
 		Required:   []string{},
 	}
 }
-func (m *mockToolAdvanced) Execute(ctx context.Context, input *tools.ToolInput) (*tools.ToolResult, error) {
+func (m *mockToolAdvanced) Execute(ctx context.Context, input *tool.ToolInput) (*tool.ToolResult, error) {
 	if m.executeFunc != nil {
 		// Convert new input format to legacy format for the mock function
 		legacyInput := input.Parameters
@@ -778,7 +778,7 @@ func (m *mockToolAdvanced) Execute(ctx context.Context, input *tools.ToolInput) 
 		}
 		return m.executeFunc(ctx, legacyInput)
 	}
-	return &tools.ToolResult{Success: true}, nil
+	return &tool.ToolResult{Success: true}, nil
 }
 func (m *mockToolAdvanced) Health(ctx context.Context) error { return nil }
 func (m *mockToolAdvanced) Close(ctx context.Context) error  { return nil }

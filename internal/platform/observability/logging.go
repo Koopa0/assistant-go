@@ -1,3 +1,6 @@
+// Package observability provides comprehensive monitoring and observability capabilities.
+// It includes structured logging with slog, OpenTelemetry integration for tracing and metrics,
+// profiling support, and unified context propagation for request tracking.
 package observability
 
 import (

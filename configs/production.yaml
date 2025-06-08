@@ -23,6 +23,10 @@ server:
   # TLS cert and key files should be set via environment variables
   static_dir: "internal/web/static"
   templates_dir: "internal/web/templates"
+  rate_limit:
+    enabled: true
+    requests_per_second: 50
+    burst_size: 100
 
 cli:
   history_file: ".goassistant_history"

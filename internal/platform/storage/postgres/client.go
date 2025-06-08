@@ -1,3 +1,6 @@
+// Package postgres provides PostgreSQL database connectivity and operations.
+// It uses pgx v5 for high-performance database access, sqlc for type-safe queries,
+// and includes support for migrations, connection pooling, and transaction management.
 package postgres
 
 import (

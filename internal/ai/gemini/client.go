@@ -32,24 +32,24 @@ type Message struct {
 
 // GenerateRequest represents a request to generate a response
 type GenerateRequest struct {
-	Messages     []Message              `json:"messages"`
-	MaxTokens    int                    `json:"max_tokens,omitempty"`
-	Temperature  float64                `json:"temperature,omitempty"`
-	Model        string                 `json:"model,omitempty"`
-	SystemPrompt *string                `json:"system_prompt,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	Messages     []Message      `json:"messages"`
+	MaxTokens    int            `json:"max_tokens,omitempty"`
+	Temperature  float64        `json:"temperature,omitempty"`
+	Model        string         `json:"model,omitempty"`
+	SystemPrompt *string        `json:"system_prompt,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
 }
 
 // GenerateResponse represents a response from the AI provider
 type GenerateResponse struct {
-	Content      string                 `json:"content"`
-	Model        string                 `json:"model"`
-	Provider     string                 `json:"provider"`
-	TokensUsed   TokenUsage             `json:"tokens_used"`
-	FinishReason string                 `json:"finish_reason"`
-	ResponseTime time.Duration          `json:"response_time"`
-	RequestID    string                 `json:"request_id,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	Content      string         `json:"content"`
+	Model        string         `json:"model"`
+	Provider     string         `json:"provider"`
+	TokensUsed   TokenUsage     `json:"tokens_used"`
+	FinishReason string         `json:"finish_reason"`
+	ResponseTime time.Duration  `json:"response_time"`
+	RequestID    string         `json:"request_id,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
 }
 
 // TokenUsage represents token usage information
@@ -217,7 +217,7 @@ type APIErrorResponse struct {
 // NewClient creates a new Gemini client
 func NewClient(config ProviderConfig, logger *slog.Logger) (*Client, error) {
 	if config.APIKey == "" {
-		return nil, fmt.Errorf("Gemini API key is required")
+		return nil, fmt.Errorf("gemini API key is required")
 	}
 
 	if config.BaseURL == "" {
@@ -363,7 +363,7 @@ func (c *Client) GenerateResponse(ctx context.Context, request *GenerateRequest)
 		TokensUsed:   tokenUsage,
 		FinishReason: finishReason,
 		ResponseTime: responseTime,
-		Metadata: map[string]interface{}{
+		Metadata: map[string]any{
 			"candidates_count": len(response.Candidates),
 		},
 	}
@@ -383,9 +383,9 @@ func (c *Client) GenerateEmbedding(ctx context.Context, text string) (*Embedding
 	c.logger.Debug("Generating embedding with Gemini", slog.String("text_length", fmt.Sprintf("%d", len(text))))
 
 	// Prepare embedding request
-	reqBody := map[string]interface{}{
+	reqBody := map[string]any{
 		"model": "models/embedding-001",
-		"content": map[string]interface{}{
+		"content": map[string]any{
 			"parts": []map[string]string{
 				{"text": text},
 			},
@@ -459,9 +459,8 @@ func (c *Client) Health(ctx context.Context) error {
 		MaxTokens: 10,
 	}
 
-	_, err := c.GenerateResponse(ctx, request)
-	if err != nil {
-		return fmt.Errorf("Gemini health check failed: %w", err)
+	if _, err := c.GenerateResponse(ctx, request); err != nil {
+		return fmt.Errorf("gemini health check failed: %w", err)
 	}
 
 	return nil

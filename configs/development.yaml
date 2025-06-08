@@ -23,6 +23,10 @@ server:
   enable_tls: false
   static_dir: "internal/web/static"
   templates_dir: "internal/web/templates"
+  rate_limit:
+    enabled: true
+    requests_per_second: 10
+    burst_size: 20
 
 cli:
   history_file: ".goassistant_history_dev"

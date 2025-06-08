@@ -10,28 +10,56 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+// RequestMetadata contains metadata for AI requests
+type RequestMetadata struct {
+	RequestID      string            `json:"request_id,omitempty"`
+	UserID         string            `json:"user_id,omitempty"`
+	SessionID      string            `json:"session_id,omitempty"`
+	ConversationID string            `json:"conversation_id,omitempty"`
+	Tags           []string          `json:"tags,omitempty"`
+	Features       map[string]string `json:"features,omitempty"` // Feature flags or settings
+}
+
+// ResponseMetadata contains metadata for AI responses
+type ResponseMetadata struct {
+	ProcessingTime time.Duration `json:"processing_time"`
+	Provider       string        `json:"provider"`
+	Model          string        `json:"model"`
+	ModelVersion   string        `json:"model_version,omitempty"`
+	Region         string        `json:"region,omitempty"`
+	Debug          *DebugInfo    `json:"debug,omitempty"`
+}
+
+// DebugInfo contains debugging information for development
+type DebugInfo struct {
+	PromptTokens     int                `json:"prompt_tokens"`
+	CompletionTokens int                `json:"completion_tokens"`
+	InternalMetrics  map[string]float64 `json:"internal_metrics,omitempty"`
+	Warnings         []string           `json:"warnings,omitempty"`
+}
+
 // GenerateRequest represents a request to generate a response
 type GenerateRequest struct {
-	Messages     []Message              `json:"messages"`
-	MaxTokens    int                    `json:"max_tokens,omitempty"`
-	Temperature  float64                `json:"temperature,omitempty"`
-	Model        string                 `json:"model,omitempty"`
-	SystemPrompt *string                `json:"system_prompt,omitempty"`
-	Tools        []Tool                 `json:"tools,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	Messages     []Message        `json:"messages"`
+	MaxTokens    int              `json:"max_tokens,omitempty"`
+	Temperature  float64          `json:"temperature,omitempty"`
+	Model        string           `json:"model,omitempty"`
+	SystemPrompt *string          `json:"system_prompt,omitempty"`
+	Tools        []Tool           `json:"tools,omitempty"`
+	Metadata     *RequestMetadata `json:"metadata,omitempty"`
 }
 
 // GenerateResponse represents a response from the AI provider
 type GenerateResponse struct {
-	Content      string                 `json:"content"`
-	Model        string                 `json:"model"`
-	Provider     string                 `json:"provider"`
-	TokensUsed   TokenUsage             `json:"tokens_used"`
-	FinishReason string                 `json:"finish_reason"`
-	ResponseTime time.Duration          `json:"response_time"`
-	RequestID    string                 `json:"request_id,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	ToolCalls    []ToolCall             `json:"tool_calls,omitempty"`
+	Content      string            `json:"content"`
+	Model        string            `json:"model"`
+	Provider     string            `json:"provider"`
+	TokensUsed   TokenUsage        `json:"tokens_used"`
+	FinishReason string            `json:"finish_reason"`
+	ResponseTime time.Duration     `json:"response_time"`
+	RequestID    string            `json:"request_id,omitempty"`
+	Metadata     *ResponseMetadata `json:"metadata,omitempty"`
+	ToolCalls    []ToolCall        `json:"tool_calls,omitempty"`
 }
 
 // TokenUsage represents token usage information
@@ -51,18 +79,56 @@ type EmbeddingResponse struct {
 	RequestID    string        `json:"request_id,omitempty"`
 }
 
+// ToolParameterSchema represents the JSON Schema for tool parameters
+type ToolParameterSchema struct {
+	Type        string                       `json:"type"` // "object"
+	Properties  map[string]ParameterProperty `json:"properties"`
+	Required    []string                     `json:"required,omitempty"`
+	Description string                       `json:"description,omitempty"`
+}
+
+// ParameterProperty represents a property in the parameter schema
+type ParameterProperty struct {
+	Type        string      `json:"type"` // "string", "number", "boolean", "array", "object"
+	Description string      `json:"description"`
+	Default     interface{} `json:"default,omitempty"` // Default value can be any type
+	Enum        []string    `json:"enum,omitempty"`
+	Format      string      `json:"format,omitempty"` // e.g., "date-time", "email"
+	MinLength   *int        `json:"minLength,omitempty"`
+	MaxLength   *int        `json:"maxLength,omitempty"`
+	Minimum     *float64    `json:"minimum,omitempty"`
+	Maximum     *float64    `json:"maximum,omitempty"`
+}
+
 // Tool represents a tool that can be called by the AI
 type Tool struct {
-	Name        string                 `json:"name"`
-	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	Parameters  *ToolParameterSchema `json:"parameters"`
+}
+
+// ToolArguments represents structured arguments for a tool call
+type ToolArguments struct {
+	// Common tool arguments
+	Action     string            `json:"action,omitempty"`
+	Target     string            `json:"target,omitempty"`
+	Parameters map[string]string `json:"parameters,omitempty"`
+	Options    *ToolOptions      `json:"options,omitempty"`
+}
+
+// ToolOptions represents optional settings for tool execution
+type ToolOptions struct {
+	Timeout    time.Duration `json:"timeout,omitempty"`
+	MaxRetries int           `json:"max_retries,omitempty"`
+	DryRun     bool          `json:"dry_run,omitempty"`
+	Verbose    bool          `json:"verbose,omitempty"`
 }
 
 // ToolCall represents a tool call made by the AI
 type ToolCall struct {
-	ID        string                 `json:"id"`
-	Name      string                 `json:"name"`
-	Arguments map[string]interface{} `json:"arguments"`
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	Arguments *ToolArguments `json:"arguments"`
 }
 
 // UsageStats represents usage statistics for a provider
