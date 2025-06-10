@@ -15,15 +15,21 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"log/slog" // Added import for slog
 )
 
-// WorkspaceDetector handles Go workspace detection and analysis
+// Static assertion to ensure *WorkspaceDetector implements DetectorService.
+var _ DetectorService = (*WorkspaceDetector)(nil)
+
+// WorkspaceDetector handles the logic for detecting and analyzing Go workspace
+// properties, including module information, packages, dependencies, etc.
 type WorkspaceDetector struct {
-	logger interface{} // Will be *slog.Logger in practice
+	logger *slog.Logger // Changed type
 }
 
-// NewWorkspaceDetector creates a new workspace detector
-func NewWorkspaceDetector(logger interface{}) *WorkspaceDetector {
+// NewWorkspaceDetector creates a new workspace detector instance.
+func NewWorkspaceDetector(logger *slog.Logger) *WorkspaceDetector { // Changed parameter type
 	return &WorkspaceDetector{
 		logger: logger,
 	}

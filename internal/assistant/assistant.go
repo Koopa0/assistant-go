@@ -427,7 +427,10 @@ func (a *Assistant) registerBuiltinTools(ctx context.Context) error {
 
 	// Register Go development tool factory
 	godevFactory := func(cfg *tool.ToolConfig, logger *slog.Logger) (tool.Tool, error) {
-		return godev.NewGoDevTool(logger), nil
+		// Instantiate the concrete WorkspaceDetector which implements godev.DetectorService.
+		workspaceDetector := godev.NewWorkspaceDetector(logger)
+		// Pass the concrete detector to NewGoDevTool, which now expects the DetectorService interface.
+		return godev.NewGoDevTool(workspaceDetector, logger), nil
 	}
 	if err := a.registry.Register("godev", godevFactory); err != nil {
 		return fmt.Errorf("failed to register godev tool: %w", err)
