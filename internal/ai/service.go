@@ -98,10 +98,11 @@ func NewService(cfg *config.Config, logger *slog.Logger) (*Service, error) {
 }
 
 // GenerateResponse generates a response using the specified or default provider
-func (s *Service) GenerateResponse(ctx context.Context, request *GenerateRequest, providerName ...string) (*GenerateResponse, error) {
+// If providerName is empty string, the default provider will be used
+func (s *Service) GenerateResponse(ctx context.Context, request *GenerateRequest, providerName string) (*GenerateResponse, error) {
 	provider := s.defaultProvider
-	if len(providerName) > 0 && providerName[0] != "" {
-		provider = providerName[0]
+	if providerName != "" {
+		provider = providerName
 	}
 
 	switch provider {
@@ -147,10 +148,11 @@ func (s *Service) GenerateResponse(ctx context.Context, request *GenerateRequest
 }
 
 // GenerateEmbedding generates embeddings using the specified or default provider
-func (s *Service) GenerateEmbedding(ctx context.Context, text string, providerName ...string) (*EmbeddingResponse, error) {
+// If providerName is empty string, the default provider will be used
+func (s *Service) GenerateEmbedding(ctx context.Context, text string, providerName string) (*EmbeddingResponse, error) {
 	provider := s.defaultProvider
-	if len(providerName) > 0 && providerName[0] != "" {
-		provider = providerName[0]
+	if providerName != "" {
+		provider = providerName
 	}
 
 	switch provider {
@@ -449,7 +451,8 @@ func convertGeminiUsageStats(stats *gemini.UsageStats) *UsageStats {
 }
 
 // ProcessEnhancedQuery processes a user query with intelligent prompt enhancement
-func (s *Service) ProcessEnhancedQuery(ctx context.Context, userQuery string, promptCtx *prompt.PromptContext, providerName ...string) (*EnhancedQueryResponse, error) {
+// If providerName is empty string, the default provider will be used
+func (s *Service) ProcessEnhancedQuery(ctx context.Context, userQuery string, promptCtx *prompt.PromptContext, providerName string) (*EnhancedQueryResponse, error) {
 	// Enhance the query with intelligent prompts
 	enhanced, err := s.promptService.EnhanceQuery(ctx, userQuery, promptCtx)
 	if err != nil {

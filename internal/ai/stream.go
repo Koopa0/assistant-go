@@ -40,10 +40,11 @@ type GenerateStreamRequest struct {
 type StreamCallback func(chunk StreamChunk) error
 
 // GenerateResponseStream generates a streaming response
-func (s *Service) GenerateResponseStream(ctx context.Context, request *GenerateStreamRequest, providerName ...string) (*StreamResponse, error) {
+// If providerName is empty string, the default provider will be used
+func (s *Service) GenerateResponseStream(ctx context.Context, request *GenerateStreamRequest, providerName string) (*StreamResponse, error) {
 	provider := s.defaultProvider
-	if len(providerName) > 0 && providerName[0] != "" {
-		provider = providerName[0]
+	if providerName != "" {
+		provider = providerName
 	}
 
 	// Create channels for streaming
