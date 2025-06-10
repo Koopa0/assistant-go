@@ -28,12 +28,12 @@ SELECT
     embedding, 
     metadata, 
     created_at,
-    1 - (embedding <=> $1::vector) AS similarity
+    1 - (embedding <=> sqlc.arg(query_embedding)::vector) AS similarity
 FROM embeddings
-WHERE content_type = $2
-  AND 1 - (embedding <=> $1::vector) > $3
-ORDER BY embedding <=> $1::vector
-LIMIT $4;
+WHERE content_type = sqlc.arg(content_type)
+  AND 1 - (embedding <=> sqlc.arg(query_embedding)::vector) > sqlc.arg(threshold)::float8
+ORDER BY embedding <=> sqlc.arg(query_embedding)::vector
+LIMIT sqlc.arg(result_limit);
 
 -- name: SearchSimilarEmbeddingsAllTypes :many
 SELECT 

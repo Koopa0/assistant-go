@@ -402,12 +402,6 @@ func (p *Processor) extractUserIDFromContext(ctx context.Context, request *Query
 		}
 	}
 
-	// For development/demo mode, allow default user
-	if p.config.Mode == "demo" || p.config.Mode == "development" {
-		p.logger.Warn("Using default user ID for demo/development mode")
-		return "demo-user", nil
-	}
-
 	// No valid user ID found
 	return "", fmt.Errorf("no authenticated user found in request or context")
 }

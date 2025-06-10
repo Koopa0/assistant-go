@@ -1,11 +1,5 @@
 -- Additional conversation queries that were missing
 
--- name: ArchiveConversation :exec
-UPDATE conversations
-SET is_archived = true,
-    updated_at = NOW()
-WHERE id = $1;
-
 -- name: UnarchiveConversation :exec
 UPDATE conversations
 SET is_archived = false,

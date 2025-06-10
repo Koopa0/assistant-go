@@ -421,7 +421,8 @@ func (q *Queries) GetEdgesByType(ctx context.Context, arg GetEdgesByTypeParams) 
 }
 
 const GetEntityEvolutionHistory = `-- name: GetEntityEvolutionHistory :many
-SELECT id, user_id, entity_type, entity_id, change_type, previous_state, new_state, change_reason, confidence, created_at FROM knowledge_evolution
+SELECT id, user_id, entity_type, entity_id, change_type, previous_state, new_state, change_reason, confidence, created_at
+FROM knowledge_evolution
 WHERE entity_id = $1::uuid
 ORDER BY created_at ASC
 `
@@ -568,7 +569,8 @@ func (q *Queries) GetHighlyConnectedNodes(ctx context.Context, arg GetHighlyConn
 }
 
 const GetKnowledgeEdge = `-- name: GetKnowledgeEdge :one
-SELECT id, user_id, source_node_id, target_node_id, edge_type, strength, properties, evidence_count, last_observed, created_at, updated_at, is_active FROM knowledge_edges
+SELECT id, user_id, source_node_id, target_node_id, edge_type, strength, properties, evidence_count, last_observed, created_at, updated_at, is_active
+FROM knowledge_edges
 WHERE id = $1
 `
 
@@ -671,7 +673,8 @@ func (q *Queries) GetKnowledgeEdges(ctx context.Context, arg GetKnowledgeEdgesPa
 }
 
 const GetKnowledgeEvolution = `-- name: GetKnowledgeEvolution :many
-SELECT id, user_id, entity_type, entity_id, change_type, previous_state, new_state, change_reason, confidence, created_at FROM knowledge_evolution
+SELECT id, user_id, entity_type, entity_id, change_type, previous_state, new_state, change_reason, confidence, created_at
+FROM knowledge_evolution
 WHERE user_id = $1::uuid
   AND (entity_type = $2 OR $2 IS NULL)
   AND (entity_id = $3::uuid OR $3 IS NULL)
@@ -725,7 +728,8 @@ func (q *Queries) GetKnowledgeEvolution(ctx context.Context, arg GetKnowledgeEvo
 }
 
 const GetKnowledgeNode = `-- name: GetKnowledgeNode :one
-SELECT id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active FROM knowledge_nodes
+SELECT id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active
+FROM knowledge_nodes
 WHERE id = $1
 `
 
@@ -752,7 +756,8 @@ func (q *Queries) GetKnowledgeNode(ctx context.Context, id pgtype.UUID) (*Knowle
 }
 
 const GetKnowledgeNodeByName = `-- name: GetKnowledgeNodeByName :one
-SELECT id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active FROM knowledge_nodes
+SELECT id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active
+FROM knowledge_nodes
 WHERE user_id = $1::uuid
   AND node_type = $2
   AND node_name = $3
@@ -788,7 +793,8 @@ func (q *Queries) GetKnowledgeNodeByName(ctx context.Context, arg GetKnowledgeNo
 }
 
 const GetKnowledgeNodes = `-- name: GetKnowledgeNodes :many
-SELECT id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active FROM knowledge_nodes
+SELECT id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active
+FROM knowledge_nodes
 WHERE user_id = $1::uuid
   AND (node_type = ANY($2::text[]) OR $2 IS NULL)
   AND is_active = true
@@ -996,7 +1002,8 @@ func (q *Queries) GetNodeConnections(ctx context.Context, arg GetNodeConnections
 }
 
 const GetNodesByImportance = `-- name: GetNodesByImportance :many
-SELECT id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active FROM knowledge_nodes
+SELECT id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active
+FROM knowledge_nodes
 WHERE user_id = $1::uuid
   AND importance >= $2
   AND is_active = true
@@ -1232,7 +1239,8 @@ func (q *Queries) GetStrongestConnections(ctx context.Context, arg GetStrongestC
 }
 
 const SearchKnowledgeNodesByName = `-- name: SearchKnowledgeNodesByName :many
-SELECT id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active FROM knowledge_nodes
+SELECT id, user_id, node_type, node_name, display_name, description, properties, embedding, importance, access_frequency, last_accessed, created_at, updated_at, is_active
+FROM knowledge_nodes
 WHERE user_id = $1::uuid
   AND to_tsvector('english', node_name || ' ' || COALESCE(display_name, '') || ' ' || COALESCE(description, '')) 
       @@ plainto_tsquery('english', $2)

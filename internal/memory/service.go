@@ -20,14 +20,14 @@ import (
 // Service provides memory operations combining business logic and data access
 // Following Go principle: simple and direct, no unnecessary abstractions
 type Service struct {
-	queries *sqlc.Queries
+	queries sqlc.Querier
 	logger  *slog.Logger
 	working *WorkingMemory
 	mu      sync.RWMutex
 }
 
 // NewService creates a new memory service
-func NewService(queries *sqlc.Queries, logger *slog.Logger) *Service {
+func NewService(queries sqlc.Querier, logger *slog.Logger) *Service {
 	return &Service{
 		queries: queries,
 		logger:  logger,

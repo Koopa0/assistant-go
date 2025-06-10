@@ -15,14 +15,14 @@ import (
 
 // Service provides LangChain integration services
 type Service struct {
-	client  *LangChainClient
+	client  *Client
 	logger  *slog.Logger
 	queries *sqlc.Queries
 	manager *agent.Manager
 }
 
 // NewService creates a new LangChain service
-func NewService(client *LangChainClient, logger *slog.Logger, queries *sqlc.Queries) *Service {
+func NewService(client *Client, logger *slog.Logger, queries *sqlc.Queries) *Service {
 	var llm llms.Model
 	if client != nil {
 		llm = client.llm

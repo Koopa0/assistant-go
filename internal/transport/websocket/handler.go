@@ -1,23 +1,29 @@
 package websocket
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/koopa0/assistant-go/internal/user"
 )
 
 // HTTPHandler 處理 WebSocket 的 HTTP 請求
 type HTTPHandler struct {
 	service        *WebSocketService
 	streamEndpoint *StreamEndpoint
+	jwtService     user.JWTService
 	logger         *slog.Logger
 }
 
 // NewHTTPHandler 建立新的 HTTP 處理器
-func NewHTTPHandler(service *WebSocketService, logger *slog.Logger) *HTTPHandler {
+func NewHTTPHandler(service *WebSocketService, jwtService user.JWTService, logger *slog.Logger) *HTTPHandler {
 	return &HTTPHandler{
 		service:        service,
 		streamEndpoint: NewStreamEndpoint(service.assistant, logger),
+		jwtService:     jwtService,
 		logger:         logger,
 	}
 }
@@ -91,15 +97,17 @@ func (h *HTTPHandler) extractUserFromToken(r *http.Request) (string, error) {
 	}
 
 	if token == "" {
-		// 暫時使用預設的 Koopa 用戶進行測試
-		h.logger.Debug("No token provided, using default user")
-		return "a0000000-0000-4000-8000-000000000001", nil
+		return "", errors.New("no authentication token provided")
 	}
 
-	// TODO: 實現真實的 JWT 驗證
-	// 目前暫時返回預設用戶
-	h.logger.Debug("Token validation not implemented, using default user")
-	return "a0000000-0000-4000-8000-000000000001", nil
+	// Extract user ID from JWT token
+	userID, err := h.jwtService.ValidateToken(token)
+	if err != nil {
+		h.logger.Error("Failed to validate token", slog.Any("error", err))
+		return "", fmt.Errorf("invalid token: %w", err)
+	}
+
+	return userID, nil
 }
 
 // handleStreamingWebSocket 處理串流 WebSocket 連接

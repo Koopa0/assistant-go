@@ -28,7 +28,7 @@ type DatabaseConfig struct {
 	MaxIdleTime    time.Duration `yaml:"max_idle_time" env:"DB_MAX_IDLE_TIME" default:"15m"`    // Close idle connections
 	MaxLifetime    time.Duration `yaml:"max_lifetime" env:"DB_MAX_LIFETIME" default:"1h"`       // Connection rotation
 	ConnectTimeout time.Duration `yaml:"connect_timeout" env:"DB_CONNECT_TIMEOUT" default:"10s"`
-	MigrationsPath string        `yaml:"migrations_path" env:"DB_MIGRATIONS_PATH" default:"internal/storage/postgres/migrations"`
+	MigrationsPath string        `yaml:"migrations_path" env:"DB_MIGRATIONS_PATH" default:"internal/platform/storage/postgres/migrations"`
 	EnableLogging  bool          `yaml:"enable_logging" env:"DB_ENABLE_LOGGING" default:"false"`
 }
 

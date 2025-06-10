@@ -2,8 +2,10 @@ package chain
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/koopa0/assistant-go/internal/langchain/documentloader"
 	"github.com/koopa0/assistant-go/internal/langchain/vectorstore"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres/sqlc"
 )
 
 // RAGChain implements Retrieval-Augmented Generation using LangChain components
@@ -26,7 +29,7 @@ type RAGChain struct {
 	retriever         schema.Retriever
 	embedder          embeddings.Embedder
 	docProcessor      *documentloader.DocumentProcessor
-	embeddingClient   *postgres.SQLCClient // Fallback for direct DB access
+	queries           sqlc.Querier // Direct database access
 	retrievalConfig   RAGRetrievalConfig
 	langchainRAGChain chains.Chain // Native LangChain RAG chain
 }
@@ -163,10 +166,10 @@ func (rc *RAGChain) initializeLangChainRAG() {
 	rc.logger.Debug("Native LangChain RAG chain initialized")
 }
 
-// SetEmbeddingClient sets the embedding client for document retrieval
-func (rc *RAGChain) SetEmbeddingClient(client *postgres.SQLCClient) {
-	rc.embeddingClient = client
-	rc.logger.Debug("Embedding client set for RAG chain")
+// SetQueries sets the database queries interface for document retrieval
+func (rc *RAGChain) SetQueries(queries sqlc.Querier) {
+	rc.queries = queries
+	rc.logger.Debug("Database queries set for RAG chain")
 }
 
 // SetRetrievalConfig sets the retrieval configuration
@@ -299,8 +302,8 @@ func (rc *RAGChain) generateQueryEmbedding(ctx context.Context, query string) ([
 
 // retrieveRelevantDocuments retrieves documents similar to the query
 func (rc *RAGChain) retrieveRelevantDocuments(ctx context.Context, queryEmbedding []float64, query string) ([]RetrievedDocument, error) {
-	if rc.embeddingClient == nil {
-		// Return mock documents if no embedding client is available
+	if rc.queries == nil {
+		// Return mock documents if no database queries are available
 		return rc.getMockDocuments(query), nil
 	}
 
@@ -308,13 +311,12 @@ func (rc *RAGChain) retrieveRelevantDocuments(ctx context.Context, queryEmbeddin
 
 	// Search for similar embeddings for each content type
 	for _, contentType := range rc.retrievalConfig.ContentTypes {
-		results, err := rc.embeddingClient.SearchSimilarEmbeddings(
-			ctx,
-			queryEmbedding,
-			contentType,
-			rc.retrievalConfig.MaxDocuments,
-			rc.retrievalConfig.SimilarityThreshold,
-		)
+		searchResults, err := rc.queries.SearchSimilarEmbeddings(ctx, sqlc.SearchSimilarEmbeddingsParams{
+			QueryEmbedding: postgres.VectorToPgVector(queryEmbedding),
+			ContentType:    contentType,
+			Threshold:      rc.retrievalConfig.SimilarityThreshold,
+			ResultLimit:    int32(rc.retrievalConfig.MaxDocuments),
+		})
 		if err != nil {
 			rc.logger.Warn("Failed to search embeddings",
 				slog.String("content_type", contentType),
@@ -323,21 +325,38 @@ func (rc *RAGChain) retrieveRelevantDocuments(ctx context.Context, queryEmbeddin
 		}
 
 		// Convert search results to retrieved documents
-		for _, result := range results {
+		for _, result := range searchResults {
+			// Convert similarity from int32 to float64 (percentage)
+			similarityFloat := float64(result.Similarity) / 100.0
+
 			doc := RetrievedDocument{
-				ID:          result.Record.ID,
-				ContentType: result.Record.ContentType,
-				ContentID:   result.Record.ContentID,
-				Content:     result.Record.ContentText,
-				Similarity:  result.Similarity,
-				Metadata:    result.Record.Metadata,
+				ID:          postgres.UUIDToString(result.ID),
+				ContentType: result.ContentType,
+				ContentID:   postgres.UUIDToString(result.ContentID),
+				Content:     result.ContentText,
+				Similarity:  similarityFloat,
+				Metadata:    nil, // Parse JSON metadata if needed
 				RetrievedAt: time.Now(),
 			}
+
+			// Parse metadata if available
+			if len(result.Metadata) > 0 {
+				var metadata map[string]interface{}
+				if err := json.Unmarshal(result.Metadata, &metadata); err == nil {
+					doc.Metadata = metadata
+				}
+			}
+
 			retrievedDocs = append(retrievedDocs, doc)
 		}
 	}
 
-	// Sort by similarity (highest first) and limit results
+	// Sort by similarity (highest first) using sort.Slice
+	sort.Slice(retrievedDocs, func(i, j int) bool {
+		return retrievedDocs[i].Similarity > retrievedDocs[j].Similarity
+	})
+
+	// Limit results
 	if len(retrievedDocs) > rc.retrievalConfig.MaxDocuments {
 		retrievedDocs = retrievedDocs[:rc.retrievalConfig.MaxDocuments]
 	}

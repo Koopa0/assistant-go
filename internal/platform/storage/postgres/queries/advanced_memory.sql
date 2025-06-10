@@ -21,14 +21,25 @@ INSERT INTO episodic_memories (
     decay_rate
 ) VALUES (
     $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
-) RETURNING *;
+) RETURNING id, user_id, episode_type, episode_summary, full_context,
+           emotional_valence, importance, vividness, embedding,
+           temporal_context, spatial_context, social_context,
+           causal_links, access_count, last_accessed, created_at, decay_rate;
 
 -- name: GetEpisodicMemory :one
-SELECT * FROM episodic_memories
+SELECT id, user_id, episode_type, episode_summary, full_context,
+       emotional_valence, importance, vividness, embedding,
+       temporal_context, spatial_context, social_context,
+       causal_links, access_count, last_accessed, created_at, decay_rate
+FROM episodic_memories
 WHERE id = $1;
 
 -- name: GetEpisodicMemories :many
-SELECT * FROM episodic_memories
+SELECT id, user_id, episode_type, episode_summary, full_context,
+       emotional_valence, importance, vividness, embedding,
+       temporal_context, spatial_context, social_context,
+       causal_links, access_count, last_accessed, created_at, decay_rate
+FROM episodic_memories
 WHERE user_id = $1::uuid
   AND (episode_type = $2 OR $2 IS NULL)
   AND importance >= COALESCE($3, 0.0)
@@ -57,17 +68,28 @@ SET access_count = access_count + 1,
     last_accessed = NOW(),
     vividness = vividness * (1 - decay_rate)
 WHERE id = $1
-RETURNING *;
+RETURNING id, user_id, episode_type, episode_summary, full_context,
+          emotional_valence, importance, vividness, embedding,
+          temporal_context, spatial_context, social_context,
+          causal_links, access_count, last_accessed, created_at, decay_rate;
 
 -- name: GetMemoriesByTemporalContext :many
-SELECT * FROM episodic_memories
+SELECT id, user_id, episode_type, episode_summary, full_context,
+       emotional_valence, importance, vividness, embedding,
+       temporal_context, spatial_context, social_context,
+       causal_links, access_count, last_accessed, created_at, decay_rate
+FROM episodic_memories
 WHERE user_id = $1::uuid
   AND temporal_context @> $2
 ORDER BY importance DESC
 LIMIT $3;
 
 -- name: GetMemoriesByCausalLink :many
-SELECT * FROM episodic_memories
+SELECT id, user_id, episode_type, episode_summary, full_context,
+       emotional_valence, importance, vividness, embedding,
+       temporal_context, spatial_context, social_context,
+       causal_links, access_count, last_accessed, created_at, decay_rate
+FROM episodic_memories
 WHERE user_id = $1::uuid
   AND $2::uuid = ANY(causal_links)
 ORDER BY importance DESC;
@@ -77,14 +99,20 @@ UPDATE episodic_memories
 SET importance = $2,
     vividness = GREATEST(vividness, $2 * 0.8) -- Boost vividness for important memories
 WHERE id = $1
-RETURNING *;
+RETURNING id, user_id, episode_type, episode_summary, full_context,
+          emotional_valence, importance, vividness, embedding,
+          temporal_context, spatial_context, social_context,
+          causal_links, access_count, last_accessed, created_at, decay_rate;
 
 -- name: AddCausalLink :one
 UPDATE episodic_memories
 SET causal_links = array_append(causal_links, $2::uuid)
 WHERE id = $1
   AND NOT ($2::uuid = ANY(causal_links))
-RETURNING *;
+RETURNING id, user_id, episode_type, episode_summary, full_context,
+          emotional_valence, importance, vividness, embedding,
+          temporal_context, spatial_context, social_context,
+          causal_links, access_count, last_accessed, created_at, decay_rate;
 
 -- name: DeleteDecayedMemories :exec
 DELETE FROM episodic_memories
@@ -110,14 +138,25 @@ INSERT INTO semantic_memories (
     embedding
 ) VALUES (
     $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9
-) RETURNING *;
+) RETURNING id, user_id, knowledge_type, subject, predicate, object,
+           confidence, source_type, source_references, embedding,
+           contradiction_count, confirmation_count, last_confirmed,
+           is_active, created_at, updated_at;
 
 -- name: GetSemanticMemory :one
-SELECT * FROM semantic_memories
+SELECT id, user_id, knowledge_type, subject, predicate, object,
+       confidence, source_type, source_references, embedding,
+       contradiction_count, confirmation_count, last_confirmed,
+       is_active, created_at, updated_at
+FROM semantic_memories
 WHERE id = $1;
 
 -- name: GetSemanticMemories :many
-SELECT * FROM semantic_memories
+SELECT id, user_id, knowledge_type, subject, predicate, object,
+       confidence, source_type, source_references, embedding,
+       contradiction_count, confirmation_count, last_confirmed,
+       is_active, created_at, updated_at
+FROM semantic_memories
 WHERE user_id = $1::uuid
   AND (knowledge_type = ANY($2::text[]) OR $2 IS NULL)
   AND is_active = true
@@ -126,7 +165,11 @@ ORDER BY confidence DESC, updated_at DESC
 LIMIT $4 OFFSET $5;
 
 -- name: SearchSemanticMemoriesBySubject :many
-SELECT * FROM semantic_memories
+SELECT id, user_id, knowledge_type, subject, predicate, object,
+       confidence, source_type, source_references, embedding,
+       contradiction_count, confirmation_count, last_confirmed,
+       is_active, created_at, updated_at
+FROM semantic_memories
 WHERE user_id = $1::uuid
   AND to_tsvector('english', subject) @@ plainto_tsquery('english', $2)
   AND is_active = true
@@ -150,7 +193,11 @@ ORDER BY embedding <=> $2::vector
 LIMIT $3;
 
 -- name: GetSemanticRelationships :many
-SELECT * FROM semantic_memories
+SELECT id, user_id, knowledge_type, subject, predicate, object,
+       confidence, source_type, source_references, embedding,
+       contradiction_count, confirmation_count, last_confirmed,
+       is_active, created_at, updated_at
+FROM semantic_memories
 WHERE user_id = $1::uuid
   AND (subject ILIKE '%' || $2 || '%' OR object::text ILIKE '%' || $2 || '%')
   AND is_active = true
@@ -164,7 +211,10 @@ SET confidence = $2,
     last_confirmed = CASE WHEN $3 THEN NOW() ELSE last_confirmed END,
     updated_at = NOW()
 WHERE id = $1
-RETURNING *;
+RETURNING id, user_id, knowledge_type, subject, predicate, object,
+          confidence, source_type, source_references, embedding,
+          contradiction_count, confirmation_count, last_confirmed,
+          is_active, created_at, updated_at;
 
 -- name: DeactivateConflictingMemories :exec
 UPDATE semantic_memories
@@ -204,21 +254,40 @@ INSERT INTO procedural_memories (
     expected_outcomes
 ) VALUES (
     $1::uuid, $2, $3, $4, $5, $6, $7
-) RETURNING *;
+) RETURNING id, user_id, procedure_name, procedure_type, trigger_conditions,
+           steps, prerequisites, expected_outcomes, success_rate,
+           execution_count, average_duration_ms, optimization_history,
+           is_automated, automation_confidence, last_executed,
+           created_at, updated_at;
 
 -- name: GetProceduralMemory :one
-SELECT * FROM procedural_memories
+SELECT id, user_id, procedure_name, procedure_type, trigger_conditions,
+       steps, prerequisites, expected_outcomes, success_rate,
+       execution_count, average_duration_ms, optimization_history,
+       is_automated, automation_confidence, last_executed,
+       created_at, updated_at
+FROM procedural_memories
 WHERE id = $1;
 
 -- name: GetProceduralMemories :many
-SELECT * FROM procedural_memories
+SELECT id, user_id, procedure_name, procedure_type, trigger_conditions,
+       steps, prerequisites, expected_outcomes, success_rate,
+       execution_count, average_duration_ms, optimization_history,
+       is_automated, automation_confidence, last_executed,
+       created_at, updated_at
+FROM procedural_memories
 WHERE user_id = $1::uuid
   AND (procedure_type = $2 OR $2 IS NULL)
 ORDER BY success_rate DESC, execution_count DESC
 LIMIT $3 OFFSET $4;
 
 -- name: SearchProceduralMemoriesByConditions :many
-SELECT * FROM procedural_memories
+SELECT id, user_id, procedure_name, procedure_type, trigger_conditions,
+       steps, prerequisites, expected_outcomes, success_rate,
+       execution_count, average_duration_ms, optimization_history,
+       is_automated, automation_confidence, last_executed,
+       created_at, updated_at
+FROM procedural_memories
 WHERE user_id = $1::uuid
   AND trigger_conditions @> $2
 ORDER BY success_rate DESC, automation_confidence DESC
@@ -236,7 +305,11 @@ SET execution_count = execution_count + 1,
     last_executed = NOW(),
     updated_at = NOW()
 WHERE id = $1
-RETURNING *;
+RETURNING id, user_id, procedure_name, procedure_type, trigger_conditions,
+          steps, prerequisites, expected_outcomes, success_rate,
+          execution_count, average_duration_ms, optimization_history,
+          is_automated, automation_confidence, last_executed,
+          created_at, updated_at;
 
 -- name: OptimizeProcedure :one
 UPDATE procedural_memories
@@ -249,7 +322,11 @@ SET steps = $2,
     ),
     updated_at = NOW()
 WHERE id = $1
-RETURNING *;
+RETURNING id, user_id, procedure_name, procedure_type, trigger_conditions,
+          steps, prerequisites, expected_outcomes, success_rate,
+          execution_count, average_duration_ms, optimization_history,
+          is_automated, automation_confidence, last_executed,
+          created_at, updated_at;
 
 -- name: UpdateAutomationConfidence :one
 UPDATE procedural_memories
@@ -257,10 +334,19 @@ SET automation_confidence = $2,
     is_automated = CASE WHEN $2 >= $3 THEN true ELSE is_automated END,
     updated_at = NOW()
 WHERE id = $1
-RETURNING *;
+RETURNING id, user_id, procedure_name, procedure_type, trigger_conditions,
+          steps, prerequisites, expected_outcomes, success_rate,
+          execution_count, average_duration_ms, optimization_history,
+          is_automated, automation_confidence, last_executed,
+          created_at, updated_at;
 
 -- name: GetAutomatableProcedures :many
-SELECT * FROM procedural_memories
+SELECT id, user_id, procedure_name, procedure_type, trigger_conditions,
+       steps, prerequisites, expected_outcomes, success_rate,
+       execution_count, average_duration_ms, optimization_history,
+       is_automated, automation_confidence, last_executed,
+       created_at, updated_at
+FROM procedural_memories
 WHERE user_id = $1::uuid
   AND success_rate >= $2
   AND execution_count >= $3
@@ -293,17 +379,25 @@ DO UPDATE SET
     reference_count = working_memory.reference_count + 1,
     last_accessed = NOW(),
     expires_at = $8
-RETURNING *;
+RETURNING id, user_id, session_id, memory_slot, content_type,
+          content, activation_level, reference_count, linked_memories,
+          created_at, last_accessed, expires_at;
 
 -- name: GetWorkingMemory :many
-SELECT * FROM working_memory
+SELECT id, user_id, session_id, memory_slot, content_type,
+       content, activation_level, reference_count, linked_memories,
+       created_at, last_accessed, expires_at
+FROM working_memory
 WHERE user_id = $1::uuid
   AND session_id = $2
   AND expires_at > NOW()
 ORDER BY memory_slot;
 
 -- name: GetWorkingMemorySlot :one
-SELECT * FROM working_memory
+SELECT id, user_id, session_id, memory_slot, content_type,
+       content, activation_level, reference_count, linked_memories,
+       created_at, last_accessed, expires_at
+FROM working_memory
 WHERE user_id = $1::uuid
   AND session_id = $2
   AND memory_slot = $3
@@ -315,7 +409,9 @@ SET activation_level = $2,
     reference_count = reference_count + 1,
     last_accessed = NOW()
 WHERE id = $1
-RETURNING *;
+RETURNING id, user_id, session_id, memory_slot, content_type,
+          content, activation_level, reference_count, linked_memories,
+          created_at, last_accessed, expires_at;
 
 -- name: ClearWorkingMemorySlot :exec
 DELETE FROM working_memory

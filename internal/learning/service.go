@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/koopa0/assistant-go/internal/platform/observability"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres/sqlc"
+	"github.com/koopa0/assistant-go/internal/user"
 )
 
 // LearningService handles learning system logic
@@ -95,13 +96,12 @@ type LearningEvent struct {
 // ListPatterns returns identified patterns with filters
 func (s *LearningService) ListPatterns(ctx context.Context, patternType string, minConfidence float64) ([]Pattern, error) {
 	// Get current user ID from context
-	userID := ctx.Value("user_id")
-	if userID == nil {
-		userID = "a0000000-0000-4000-8000-000000000001" // Default user ID
-		s.logger.Warn("No user ID in context, using default", slog.String("default_id", userID.(string)))
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return nil, user.ErrNoUserInContext
 	}
 
-	userUUID, err := uuid.Parse(userID.(string))
+	userUUID, err := uuid.Parse(userID)
 	if err != nil {
 		s.logger.Error("Invalid user ID", slog.Any("error", err))
 		return nil, fmt.Errorf("invalid user ID: %w", err)
@@ -353,13 +353,12 @@ func (s *LearningService) getDefaultPatterns(patternType string, minConfidence f
 // GetPattern retrieves a specific pattern
 func (s *LearningService) GetPattern(ctx context.Context, patternID string) (*Pattern, error) {
 	// Get current user ID from context
-	userID := ctx.Value("user_id")
-	if userID == nil {
-		userID = "a0000000-0000-4000-8000-000000000001" // Default user ID
-		s.logger.Warn("No user ID in context, using default", slog.String("default_id", userID.(string)))
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return nil, user.ErrNoUserInContext
 	}
 
-	userUUID, err := uuid.Parse(userID.(string))
+	userUUID, err := uuid.Parse(userID)
 	if err != nil {
 		s.logger.Error("Invalid user ID", slog.Any("error", err))
 		return nil, fmt.Errorf("invalid user ID: %w", err)
@@ -405,13 +404,12 @@ func (s *LearningService) GetPattern(ctx context.Context, patternID string) (*Pa
 // DetectPatterns analyzes data to detect patterns
 func (s *LearningService) DetectPatterns(ctx context.Context, data map[string]interface{}, scope string) ([]Pattern, error) {
 	// Get current user ID from context
-	userID := ctx.Value("user_id")
-	if userID == nil {
-		userID = "a0000000-0000-4000-8000-000000000001" // Default user ID
-		s.logger.Warn("No user ID in context, using default", slog.String("default_id", userID.(string)))
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return nil, user.ErrNoUserInContext
 	}
 
-	userUUID, err := uuid.Parse(userID.(string))
+	userUUID, err := uuid.Parse(userID)
 	if err != nil {
 		s.logger.Error("Invalid user ID", slog.Any("error", err))
 		return nil, fmt.Errorf("invalid user ID: %w", err)
@@ -501,13 +499,12 @@ func (s *LearningService) DetectPatterns(ctx context.Context, data map[string]in
 // ListPreferences returns learned preferences
 func (s *LearningService) ListPreferences(ctx context.Context, category string) ([]Preference, error) {
 	// Get current user ID from context
-	userID := ctx.Value("user_id")
-	if userID == nil {
-		userID = "a0000000-0000-4000-8000-000000000001" // Default user ID
-		s.logger.Warn("No user ID in context, using default", slog.String("default_id", userID.(string)))
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return nil, user.ErrNoUserInContext
 	}
 
-	userUUID, err := uuid.Parse(userID.(string))
+	userUUID, err := uuid.Parse(userID)
 	if err != nil {
 		s.logger.Error("Invalid user ID", slog.Any("error", err))
 		return nil, fmt.Errorf("invalid user ID: %w", err)
@@ -673,13 +670,12 @@ func (s *LearningService) getDefaultPreferences(category string) []Preference {
 // UpdatePreferences updates user preferences
 func (s *LearningService) UpdatePreferences(ctx context.Context, updates map[string]interface{}) error {
 	// Get current user ID from context
-	userID := ctx.Value("user_id")
-	if userID == nil {
-		userID = "a0000000-0000-4000-8000-000000000001" // Default user ID
-		s.logger.Warn("No user ID in context, using default", slog.String("default_id", userID.(string)))
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return user.ErrNoUserInContext
 	}
 
-	userUUID, err := uuid.Parse(userID.(string))
+	userUUID, err := uuid.Parse(userID)
 	if err != nil {
 		s.logger.Error("Invalid user ID", slog.Any("error", err))
 		return fmt.Errorf("invalid user ID: %w", err)
@@ -726,13 +722,12 @@ func (s *LearningService) UpdatePreferences(ctx context.Context, updates map[str
 // PredictPreference predicts a preference value
 func (s *LearningService) PredictPreference(ctx context.Context, category, contextStr string) (map[string]interface{}, error) {
 	// Get current user ID from context
-	userID := ctx.Value("user_id")
-	if userID == nil {
-		userID = "a0000000-0000-4000-8000-000000000001" // Default user ID
-		s.logger.Warn("No user ID in context, using default", slog.String("default_id", userID.(string)))
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return nil, user.ErrNoUserInContext
 	}
 
-	userUUID, err := uuid.Parse(userID.(string))
+	userUUID, err := uuid.Parse(userID)
 	if err != nil {
 		s.logger.Error("Invalid user ID", slog.Any("error", err))
 		return nil, fmt.Errorf("invalid user ID: %w", err)
@@ -811,13 +806,12 @@ func (s *LearningService) PredictPreference(ctx context.Context, category, conte
 // CreateLearningEvent creates a new learning event
 func (s *LearningService) CreateLearningEvent(ctx context.Context, event LearningEvent) (*LearningEvent, error) {
 	// Get current user ID from context
-	userID := ctx.Value("user_id")
-	if userID == nil {
-		userID = "a0000000-0000-4000-8000-000000000001" // Default user ID
-		s.logger.Warn("No user ID in context, using default", slog.String("default_id", userID.(string)))
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return nil, user.ErrNoUserInContext
 	}
 
-	userUUID, err := uuid.Parse(userID.(string))
+	userUUID, err := uuid.Parse(userID)
 	if err != nil {
 		s.logger.Error("Invalid user ID", slog.Any("error", err))
 		return nil, fmt.Errorf("invalid user ID: %w", err)
@@ -882,13 +876,12 @@ func (s *LearningService) CreateLearningEvent(ctx context.Context, event Learnin
 // ListLearningEvents returns learning events
 func (s *LearningService) ListLearningEvents(ctx context.Context, eventType string, startTime, endTime time.Time, limit int) ([]LearningEvent, error) {
 	// Get current user ID from context
-	userID := ctx.Value("user_id")
-	if userID == nil {
-		userID = "a0000000-0000-4000-8000-000000000001" // Default user ID
-		s.logger.Warn("No user ID in context, using default", slog.String("default_id", userID.(string)))
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return nil, user.ErrNoUserInContext
 	}
 
-	userUUID, err := uuid.Parse(userID.(string))
+	userUUID, err := uuid.Parse(userID)
 	if err != nil {
 		s.logger.Error("Invalid user ID", slog.Any("error", err))
 		return nil, fmt.Errorf("invalid user ID: %w", err)
@@ -1077,13 +1070,12 @@ func (s *LearningService) ProvideFeedback(ctx context.Context, feedback map[stri
 // GetReinforcement returns reinforcement learning data
 func (s *LearningService) GetReinforcement(ctx context.Context, action, contextStr string) (map[string]interface{}, error) {
 	// Get current user ID from context
-	userID := ctx.Value("user_id")
-	if userID == nil {
-		userID = "a0000000-0000-4000-8000-000000000001" // Default user ID
-		s.logger.Warn("No user ID in context, using default", slog.String("default_id", userID.(string)))
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return nil, user.ErrNoUserInContext
 	}
 
-	userUUID, err := uuid.Parse(userID.(string))
+	userUUID, err := uuid.Parse(userID)
 	if err != nil {
 		s.logger.Error("Invalid user ID", slog.Any("error", err))
 		return nil, fmt.Errorf("invalid user ID: %w", err)
@@ -1179,13 +1171,12 @@ func (s *LearningService) GetReinforcement(ctx context.Context, action, contextS
 // GetLearningReport generates a learning report
 func (s *LearningService) GetLearningReport(ctx context.Context, period string) (map[string]interface{}, error) {
 	// Get current user ID from context
-	userID := ctx.Value("user_id")
-	if userID == nil {
-		userID = "a0000000-0000-4000-8000-000000000001" // Default user ID
-		s.logger.Warn("No user ID in context, using default", slog.String("default_id", userID.(string)))
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return nil, user.ErrNoUserInContext
 	}
 
-	userUUID, err := uuid.Parse(userID.(string))
+	userUUID, err := uuid.Parse(userID)
 	if err != nil {
 		s.logger.Error("Invalid user ID", slog.Any("error", err))
 		return nil, fmt.Errorf("invalid user ID: %w", err)

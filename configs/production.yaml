@@ -10,7 +10,7 @@ database:
   max_idle_time: "15m"
   max_lifetime: "1h"
   connect_timeout: "10s"
-  migrations_path: "internal/storage/postgres/migrations"
+  migrations_path: "internal/platform/storage/postgres/migrations"
   enable_logging: false
 
 server:
@@ -87,11 +87,11 @@ tools:
     timeout: "60s"
 
 security:
-  # JWT secret should be set via environment variable JWT_SECRET
-  jwt_expiration: "24h"
+  # JWT 配置 - 生產環境必須設定環境變數 SECURITY_JWT_SECRET
+  jwt_secret: "${SECURITY_JWT_SECRET}" # 強制從環境變數載入
+  jwt_expiration: "12h" # 生產環境較短的過期時間
   rate_limit_rps: 100
   rate_limit_burst: 200
   enable_cors: true
-  allowed_origins:
-    - "https://yourdomain.com"
-    - "https://app.yourdomain.com"
+  # 生產環境必須明確配置允許的來源
+  allowed_origins: [] # 必須透過環境變數或部署配置設定

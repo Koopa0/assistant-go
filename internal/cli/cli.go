@@ -15,21 +15,29 @@ import (
 	"github.com/koopa0/assistant-go/internal/assistant"
 	"github.com/koopa0/assistant-go/internal/cli/ui"
 	"github.com/koopa0/assistant-go/internal/config"
+	"github.com/koopa0/assistant-go/internal/langchain/agent"
+	"github.com/koopa0/assistant-go/internal/user"
 )
 
 // CLI represents the enhanced command-line interface
 type CLI struct {
-	config    config.CLIConfig
-	assistant *assistant.Assistant
-	logger    *slog.Logger
-	prompt    *ui.Prompt
-	version   string
+	config      config.CLIConfig
+	assistant   *assistant.Assistant
+	logger      *slog.Logger
+	prompt      *ui.Prompt
+	version     string
+	authToken   string
+	currentUser *user.UserInfo
+	authService *user.AuthService
 }
 
 // New creates a new enhanced CLI instance
-func New(cfg config.CLIConfig, assistant *assistant.Assistant, logger *slog.Logger) (*CLI, error) {
+func New(cfg config.CLIConfig, assistant *assistant.Assistant, authService *user.AuthService, logger *slog.Logger) (*CLI, error) {
 	if assistant == nil {
 		return nil, fmt.Errorf("assistant is required")
+	}
+	if authService == nil {
+		return nil, fmt.Errorf("auth service is required")
 	}
 	if logger == nil {
 		return nil, fmt.Errorf("logger is required")
@@ -53,11 +61,12 @@ func New(cfg config.CLIConfig, assistant *assistant.Assistant, logger *slog.Logg
 	}
 
 	return &CLI{
-		config:    cfg,
-		assistant: assistant,
-		logger:    logger,
-		prompt:    prompt,
-		version:   GetVersion(),
+		config:      cfg,
+		assistant:   assistant,
+		authService: authService,
+		logger:      logger,
+		prompt:      prompt,
+		version:     GetVersion(),
 	}, nil
 }
 
@@ -65,6 +74,15 @@ func New(cfg config.CLIConfig, assistant *assistant.Assistant, logger *slog.Logg
 func (c *CLI) Run(ctx context.Context) error {
 	// Show welcome screen
 	c.showWelcome()
+
+	// Check if user is logged in
+	if !c.isLoggedIn() {
+		ui.Info.Println("Please login to continue")
+		if err := c.login(ctx); err != nil {
+			ui.Error.Printf("Login failed: %v\n", err)
+			return err
+		}
+	}
 
 	// Show help hint
 	ui.Info.Println("Type 'help' for available commands, 'menu' for interactive mode, 'exit' to quit")
@@ -152,6 +170,10 @@ func (c *CLI) handleCommand(ctx context.Context, input string) bool {
 		c.prompt.Close()
 		c.showGoodbye()
 		os.Exit(0)
+
+	case "logout":
+		c.logout()
+		return true
 
 	case "clear", "cls":
 		fmt.Print("\033[H\033[2J")
@@ -244,8 +266,19 @@ func (c *CLI) processQuery(ctx context.Context, query string) {
 	// Show progress indicator for non-streaming mode
 	stop := ui.ShowProgress("Processing query...")
 
-	// Process the query
-	response, err := c.assistant.ProcessQuery(ctx, query)
+	// Create a query request with authenticated user ID
+	if c.currentUser == nil {
+		ui.Error.Println("Please login first")
+		return
+	}
+
+	request := &assistant.QueryRequest{
+		Query:  query,
+		UserID: &c.currentUser.ID,
+	}
+
+	// Process the query with request
+	response, err := c.assistant.ProcessQueryRequest(ctx, request)
 	stop()
 
 	if err != nil {
@@ -259,7 +292,7 @@ func (c *CLI) processQuery(ctx context.Context, query string) {
 	fmt.Println(ui.Divider())
 
 	// Format and display the response
-	fmt.Println(c.formatResponse(response))
+	fmt.Println(c.formatResponse(response.Response))
 
 	fmt.Println()
 }
@@ -487,6 +520,55 @@ func (c *CLI) Close() error {
 	return nil
 }
 
+// isLoggedIn checks if user is logged in
+func (c *CLI) isLoggedIn() bool {
+	return c.authToken != "" && c.currentUser != nil
+}
+
+// login performs the login flow
+func (c *CLI) login(ctx context.Context) error {
+	// Get email
+	email, err := ui.PromptInput("Email: ")
+	if err != nil {
+		return err
+	}
+
+	// Get password (hidden input)
+	password, err := ui.PromptPassword("Password: ")
+	if err != nil {
+		return err
+	}
+
+	// Authenticate
+	authResp, err := c.authService.Login(ctx, email, password)
+	if err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+
+	// Store auth info
+	c.authToken = authResp.AccessToken
+	c.currentUser = &user.UserInfo{
+		ID:       authResp.User.ID,
+		Email:    authResp.User.Email,
+		Username: authResp.User.Name,
+		Roles:    []string{authResp.User.Role},
+	}
+
+	// Update prompt to show username
+	c.prompt.SetPrompt(fmt.Sprintf("Assistant[%s]> ", c.currentUser.Username))
+
+	ui.Success.Printf("Welcome, %s!\n", c.currentUser.Username)
+	return nil
+}
+
+// logout logs out the current user
+func (c *CLI) logout() {
+	c.authToken = ""
+	c.currentUser = nil
+	c.prompt.SetPrompt(c.config.PromptTemplate)
+	ui.Info.Println("Logged out successfully")
+}
+
 // LangChain command handlers
 
 // showLangChainHelp displays help for LangChain commands
@@ -555,12 +637,26 @@ func (c *CLI) showLangChainAgents(ctx context.Context) {
 		return
 	}
 
-	// TODO: Get agents from service
+	// Get agents from service
+	agentTypes := langchainService.GetAgentTypes()
+
 	ui.Info.Println("\nAvailable LangChain Agents:")
-	ui.Muted.Println("  - development: Development-focused agent")
-	ui.Muted.Println("  - database: Database operations agent")
-	ui.Muted.Println("  - infrastructure: Infrastructure management agent")
-	ui.Muted.Println("  - research: Research and analysis agent")
+	for _, agentType := range agentTypes {
+		switch agentType {
+		case agent.TypeDevelopment:
+			ui.Muted.Println("  - development: Development-focused agent")
+		case agent.TypeDatabase:
+			ui.Muted.Println("  - database: Database operations agent")
+		case agent.TypeInfrastructure:
+			ui.Muted.Println("  - infrastructure: Infrastructure management agent")
+		case agent.TypeResearch:
+			ui.Muted.Println("  - research: Research and analysis agent")
+		case agent.TypeGeneral:
+			ui.Muted.Println("  - general: General-purpose agent")
+		default:
+			ui.Muted.Printf("  - %s: Custom agent\n", agentType)
+		}
+	}
 }
 
 // showLangChainChains displays available LangChain chains
@@ -589,12 +685,47 @@ func (c *CLI) executeLangChainAgent(ctx context.Context, agentType, query string
 
 	// Show progress
 	stop := ui.ShowProgress(fmt.Sprintf("Executing %s agent...", agentType))
-	defer stop()
 
-	// TODO: Execute agent through service
-	ui.Success.Printf("\nAgent '%s' executed successfully\n", agentType)
+	// Create agent request
+	request := &agent.Request{
+		Query:       query,
+		MaxSteps:    5,
+		Temperature: 0.7,
+		Context:     make(map[string]interface{}),
+	}
+
+	// Execute agent through service
+	response, err := langchainService.ExecuteAgent(ctx, agent.AgentType(agentType), request)
+	stop()
+
+	if err != nil {
+		ui.Error.Printf("\nAgent execution failed: %v\n", err)
+		return
+	}
+
+	if response.Success {
+		ui.Success.Printf("\nAgent '%s' executed successfully\n", agentType)
+	} else {
+		ui.Warning.Printf("\nAgent '%s' execution completed with issues\n", agentType)
+	}
+
 	ui.Info.Printf("Query: %s\n", query)
-	ui.Muted.Println("\nResult: [Agent execution not yet implemented]")
+	ui.Info.Printf("Execution time: %v\n", response.ExecutionTime)
+	ui.Info.Printf("Confidence: %.2f\n", response.Confidence)
+
+	// Show steps if available
+	if len(response.Steps) > 0 {
+		ui.Muted.Println("\nExecution steps:")
+		for i, step := range response.Steps {
+			ui.Muted.Printf("  %d. %s\n", i+1, step.Action)
+			if step.Result != "" {
+				ui.Muted.Printf("     %s\n", step.Result)
+			}
+		}
+	}
+
+	ui.Success.Println("\nResult:")
+	fmt.Println(response.Result)
 }
 
 // executeLangChainChain executes a specific chain

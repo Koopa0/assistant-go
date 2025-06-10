@@ -7,11 +7,13 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/koopa0/assistant-go/internal/platform/observability"
 	"github.com/koopa0/assistant-go/internal/platform/server/middleware"
+	"github.com/koopa0/assistant-go/internal/user"
 )
 
 // requestIDMiddleware adds a unique request ID to each request
@@ -70,19 +72,49 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// corsMiddleware handles CORS headers
+// corsMiddleware 處理 CORS headers - 生產環境必須配置允許的來源
 func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set CORS headers
-		w.Header().Set("Access-Control-Allow-Origin", "*") // TODO: Configure based on config
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
-		w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
-		w.Header().Set("Access-Control-Max-Age", "86400")
+		// 從配置獲取允許的來源，預設只允許本地開發
+		allowedOrigins := s.config.Security.AllowedOrigins
+		if len(allowedOrigins) == 0 {
+			// 開發環境預設配置
+			if s.config.Address == ":8080" || s.config.Address == "localhost:8080" {
+				allowedOrigins = []string{"http://localhost:3000", "http://localhost:8080"}
+			} else {
+				// 生產環境必須明確配置
+				s.logger.Warn("CORS: 未配置允許的來源，拒絕所有跨域請求")
+				allowedOrigins = []string{} // 不允許任何跨域
+			}
+		}
 
-		// Handle preflight requests
+		// 檢查請求來源是否在允許清單中
+		origin := r.Header.Get("Origin")
+		allowed := false
+		for _, allowedOrigin := range allowedOrigins {
+			if origin == allowedOrigin {
+				allowed = true
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				break
+			}
+		}
+
+		// 只有在允許的情況下設定 CORS headers
+		if allowed {
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
+			w.Header().Set("Access-Control-Expose-Headers", "X-Request-ID")
+			w.Header().Set("Access-Control-Max-Age", "86400")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+
+		// 處理預檢請求
 		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
+			if allowed {
+				w.WriteHeader(http.StatusNoContent)
+			} else {
+				w.WriteHeader(http.StatusForbidden)
+			}
 			return
 		}
 
@@ -251,4 +283,56 @@ func (s *Server) initRateLimiter() {
 		slog.Int("requests_per_second", rateLimitConfig.RequestsPerSecond),
 		slog.Int("burst_size", rateLimitConfig.BurstSize),
 		slog.Int("endpoint_limits", len(rateLimitConfig.EndpointLimits)))
+}
+
+// authMiddleware validates JWT tokens and adds user context
+func (s *Server) authMiddleware(authService user.JWTService) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Skip auth for public endpoints
+			publicPaths := []string{
+				"/api/health",
+				"/api/status",
+				"/api/v1/auth/login",
+				"/api/v1/auth/register",
+				"/api/v1/auth/refresh",
+				"/", // Root API info endpoint
+			}
+
+			for _, path := range publicPaths {
+				if r.URL.Path == path {
+					next.ServeHTTP(w, r)
+					return
+				}
+			}
+
+			// Extract token from Authorization header
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" {
+				s.writeErrorResponse(w, http.StatusUnauthorized, "Missing authorization header")
+				return
+			}
+
+			// Check Bearer prefix
+			const bearerPrefix = "Bearer "
+			if !strings.HasPrefix(authHeader, bearerPrefix) {
+				s.writeErrorResponse(w, http.StatusUnauthorized, "Invalid authorization header format")
+				return
+			}
+
+			token := strings.TrimPrefix(authHeader, bearerPrefix)
+
+			// Validate token
+			userID, err := authService.ValidateToken(token)
+			if err != nil {
+				s.logger.Warn("Invalid token", slog.Any("error", err))
+				s.writeErrorResponse(w, http.StatusUnauthorized, "Invalid token")
+				return
+			}
+
+			// Add user ID to request context
+			ctx := context.WithValue(r.Context(), "user_id", userID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }

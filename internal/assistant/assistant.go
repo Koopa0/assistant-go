@@ -154,16 +154,30 @@ func New(ctx context.Context, cfg *config.Config, db postgres.DB, logger *slog.L
 	// Initialize LangChain service if configured (optional)
 	var langchainService *langchain.Service
 	if cfg.Tools.LangChain.EnableMemory {
-		// Try to create a working LangChain service
-		// Create a simple LangChain client first
-		langchainClient := &langchain.LangChainClient{
-			// Will be nil for now - requires LLM setup
+		// Try to create a LangChain client with available AI provider
+		var langchainClient *langchain.Client
+		var err error
+
+		if cfg.AI.Claude.APIKey != "" {
+			// Use Claude provider
+			langchainClient, err = langchain.NewClient("claude", cfg.AI.Claude, cfg.Tools.LangChain, logger)
+			if err != nil {
+				logger.Warn("Failed to create LangChain client with Claude", slog.Any("error", err))
+			}
+		} else if cfg.AI.Gemini.APIKey != "" {
+			// Use Gemini provider
+			langchainClient, err = langchain.NewClient("gemini", cfg.AI.Gemini, cfg.Tools.LangChain, logger)
+			if err != nil {
+				logger.Warn("Failed to create LangChain client with Gemini", slog.Any("error", err))
+			}
 		}
 
-		// Note: LangChain service creation might fail due to missing dependencies
-		// This is expected in demo mode or when LangChain dependencies are not fully configured
-		langchainService = langchain.NewService(langchainClient, logger, db.GetQueries())
-		logger.Info("LangChain service initialized (limited functionality without LLM)")
+		if langchainClient != nil {
+			langchainService = langchain.NewService(langchainClient, logger, db.GetQueries())
+			logger.Info("LangChain service initialized successfully")
+		} else {
+			logger.Warn("LangChain service not initialized - no AI provider configured")
+		}
 	}
 
 	assistant := &Assistant{

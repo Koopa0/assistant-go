@@ -2,12 +2,14 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres/sqlc"
 )
@@ -49,6 +51,15 @@ func (m *MockClient) Exec(ctx context.Context, sql string, args ...any) (pgconn.
 func (m *MockClient) Begin(ctx context.Context) (pgx.Tx, error) {
 	m.logger.Debug("Mock transaction begun")
 	return &mockTx{client: m}, nil
+}
+
+// CopyFrom implements the DBTX CopyFrom method
+func (m *MockClient) CopyFrom(ctx context.Context, tableName pgx.Identifier, columnNames []string, rowSrc pgx.CopyFromSource) (int64, error) {
+	m.logger.Debug("Mock CopyFrom executed",
+		slog.Any("table", tableName),
+		slog.Any("columns", columnNames))
+	// Return a mock number of rows copied
+	return 10, nil
 }
 
 // WithTransaction implements transaction handling
@@ -104,9 +115,11 @@ func (m *MockClient) Close() error {
 	return nil
 }
 
-// GetQueries returns nil for mock implementation
+// GetQueries returns mock queries implementation
 func (m *MockClient) GetQueries() *sqlc.Queries {
-	return nil
+	// Create a temporary connection that will be used by sqlc.Queries
+	// In demo mode, this won't actually connect to a database
+	return sqlc.New(m)
 }
 
 // Migrate runs mock database migrations
@@ -155,13 +168,32 @@ func (r *mockRows) Scan(dest ...interface{}) error {
 	for i, d := range dest {
 		switch v := d.(type) {
 		case *string:
-			*v = fmt.Sprintf("mock-value-%d", i)
+			// Special handling for role field (usually index 2 in messages)
+			if i == 2 {
+				// Alternate between user and assistant for mock conversation
+				if r.index%2 == 0 {
+					*v = "user"
+				} else {
+					*v = "assistant"
+				}
+			} else {
+				*v = fmt.Sprintf("mock-value-%d", i)
+			}
 		case *int:
-			*v = i
+			*v = i * 100 // More realistic token counts
 		case *time.Time:
-			*v = time.Now()
+			*v = time.Now().Add(-time.Duration(r.index) * time.Minute)
 		case *bool:
 			*v = true
+		case *pgtype.UUID:
+			// Generate a mock UUID for demo mode
+			v.Bytes = [16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, byte(i)}
+			v.Valid = true
+		case *pgtype.Text:
+			v.String = fmt.Sprintf("mock-text-%d", i)
+			v.Valid = true
+		case *json.RawMessage:
+			*v = json.RawMessage(`{"mock": true}`)
 		}
 	}
 	return nil
@@ -176,16 +208,31 @@ type mockRow struct{}
 
 func (r *mockRow) Scan(dest ...interface{}) error {
 	// Mock scan implementation
+	// This is typically used for CreateMessage, CreateConversation etc.
 	for i, d := range dest {
 		switch v := d.(type) {
 		case *string:
-			*v = fmt.Sprintf("mock-value-%d", i)
+			// Special handling for role field (usually index 2 in messages)
+			if i == 2 {
+				*v = "assistant" // Default to assistant role for mock responses
+			} else {
+				*v = fmt.Sprintf("mock-value-%d", i)
+			}
 		case *int:
 			*v = i
 		case *time.Time:
 			*v = time.Now()
 		case *bool:
 			*v = true
+		case *pgtype.UUID:
+			// Generate a mock UUID for demo mode
+			v.Bytes = [16]byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, byte(i)}
+			v.Valid = true
+		case *pgtype.Text:
+			v.String = fmt.Sprintf("mock-text-%d", i)
+			v.Valid = true
+		case *json.RawMessage:
+			*v = json.RawMessage(`{"mock": true}`)
 		}
 	}
 	return nil

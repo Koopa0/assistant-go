@@ -74,8 +74,8 @@ type UsageStats struct {
 	RequestsPerHour float64       `json:"requests_per_hour"`
 }
 
-// LangChainClient wraps LangChain-Go functionality with our AI interface
-type LangChainClient struct {
+// Client wraps LangChain-Go functionality with our AI interface
+type Client struct {
 	llm      llms.Model
 	memory   schema.Memory
 	config   config.LangChain
@@ -83,8 +83,8 @@ type LangChainClient struct {
 	provider string
 }
 
-// NewLangChainClient creates a new LangChain-Go client
-func NewLangChainClient(provider string, aiConfig interface{}, langchainConfig config.LangChain, logger *slog.Logger) (*LangChainClient, error) {
+// NewClient creates a new LangChain-Go client
+func NewClient(provider string, aiConfig interface{}, langchainConfig config.LangChain, logger *slog.Logger) (*Client, error) {
 	var llm llms.Model
 	var err error
 
@@ -126,7 +126,7 @@ func NewLangChainClient(provider string, aiConfig interface{}, langchainConfig c
 		mem = memory.NewConversationBuffer()
 	}
 
-	return &LangChainClient{
+	return &Client{
 		llm:      llm,
 		memory:   mem,
 		config:   langchainConfig,
@@ -136,12 +136,12 @@ func NewLangChainClient(provider string, aiConfig interface{}, langchainConfig c
 }
 
 // Name returns the provider name
-func (c *LangChainClient) Name() string {
+func (c *Client) Name() string {
 	return fmt.Sprintf("langchain-%s", c.provider)
 }
 
 // GenerateResponse generates a response using LangChain-Go
-func (c *LangChainClient) GenerateResponse(ctx context.Context, request *GenerateRequest) (*GenerateResponse, error) {
+func (c *Client) GenerateResponse(ctx context.Context, request *GenerateRequest) (*GenerateResponse, error) {
 	startTime := time.Now()
 
 	c.logger.Debug("Generating response with LangChain",
@@ -206,14 +206,14 @@ func (c *LangChainClient) GenerateResponse(ctx context.Context, request *Generat
 }
 
 // GenerateEmbedding generates embeddings (not directly supported by LangChain-Go core)
-func (c *LangChainClient) GenerateEmbedding(ctx context.Context, text string) (*EmbeddingResponse, error) {
+func (c *Client) GenerateEmbedding(ctx context.Context, text string) (*EmbeddingResponse, error) {
 	// LangChain-Go doesn't have direct embedding support in the core
 	// This would need to be implemented using specific embedding models
 	return nil, fmt.Errorf("embedding generation not implemented for LangChain provider")
 }
 
 // Health checks if the LangChain client is healthy
-func (c *LangChainClient) Health(ctx context.Context) error {
+func (c *Client) Health(ctx context.Context) error {
 	// Simple health check by generating a minimal response
 	_, err := c.llm.Call(ctx, "Hello", llms.WithMaxTokens(1))
 	if err != nil {
@@ -224,13 +224,13 @@ func (c *LangChainClient) Health(ctx context.Context) error {
 }
 
 // Close closes the LangChain client
-func (c *LangChainClient) Close(ctx context.Context) error {
+func (c *Client) Close(ctx context.Context) error {
 	// LangChain-Go doesn't require explicit cleanup
 	return nil
 }
 
 // GetUsage returns usage statistics
-func (c *LangChainClient) GetUsage(ctx context.Context) (*UsageStats, error) {
+func (c *Client) GetUsage(ctx context.Context) (*UsageStats, error) {
 	// LangChain-Go doesn't provide built-in usage tracking
 	// This would need to be implemented separately
 	return &UsageStats{
@@ -248,12 +248,12 @@ func (c *LangChainClient) GetUsage(ctx context.Context) (*UsageStats, error) {
 
 // Helper methods
 
-func (c *LangChainClient) convertToLangChainMessages(messages []Message) []Message {
+func (c *Client) convertToLangChainMessages(messages []Message) []Message {
 	// For now, just return the messages as-is since we're using the simplified API
 	return messages
 }
 
-func (c *LangChainClient) convertMessagesToString(messages []Message) string {
+func (c *Client) convertMessagesToString(messages []Message) string {
 	// Convert messages to a simple string format for the Call API
 	var result string
 	for _, msg := range messages {
@@ -271,7 +271,7 @@ func (c *LangChainClient) convertMessagesToString(messages []Message) string {
 	return result
 }
 
-func (c *LangChainClient) estimateTokenUsage(messages []Message, response string) TokenUsage {
+func (c *Client) estimateTokenUsage(messages []Message, response string) TokenUsage {
 	// Simple token estimation (4 characters ≈ 1 token for English)
 	inputChars := 0
 	for _, msg := range messages {
@@ -289,28 +289,28 @@ func (c *LangChainClient) estimateTokenUsage(messages []Message, response string
 	}
 }
 
-func (c *LangChainClient) getModelFromResponse(response string) string {
+func (c *Client) getModelFromResponse(response string) string {
 	// Since we're using the simplified Call API, we don't have response metadata
 	// Return the configured model or a default
 	return fmt.Sprintf("%s-model", c.provider)
 }
 
-func (c *LangChainClient) getFinishReason(response string) string {
+func (c *Client) getFinishReason(response string) string {
 	// Since we're using the simplified Call API, we assume completion
 	return "stop"
 }
 
-func (c *LangChainClient) generateRequestID() string {
+func (c *Client) generateRequestID() string {
 	return fmt.Sprintf("langchain-%s-%d", c.provider, time.Now().UnixNano())
 }
 
 // GetMemory returns the conversation memory if enabled
-func (c *LangChainClient) GetMemory() schema.Memory {
+func (c *Client) GetMemory() schema.Memory {
 	return c.memory
 }
 
 // ClearMemory clears the conversation memory
-func (c *LangChainClient) ClearMemory(ctx context.Context) error {
+func (c *Client) ClearMemory(ctx context.Context) error {
 	if c.memory != nil {
 		c.memory.Clear(ctx)
 	}

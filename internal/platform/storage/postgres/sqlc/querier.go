@@ -15,7 +15,6 @@ type Querier interface {
 	AddCausalLink(ctx context.Context, arg AddCausalLinkParams) (*EpisodicMemory, error)
 	AddFavoriteTool(ctx context.Context, arg AddFavoriteToolParams) (*AddFavoriteToolRow, error)
 	AddSkillLearningPoint(ctx context.Context, arg AddSkillLearningPointParams) (*UserSkill, error)
-	// Additional conversation queries that were missing
 	ArchiveConversation(ctx context.Context, id pgtype.UUID) error
 	// =====================================================
 	// MEMORY LIFECYCLE OPERATIONS
@@ -29,6 +28,8 @@ type Querier interface {
 	BatchCreateMemoryEntries(ctx context.Context, arg []BatchCreateMemoryEntriesParams) (int64, error)
 	// Batch update access counts for multiple entries
 	BatchIncrementMemoryAccess(ctx context.Context, ids []pgtype.UUID) error
+	// Delete multiple embeddings by IDs
+	BulkDeleteEmbeddings(ctx context.Context, dollar_1 []pgtype.UUID) error
 	CleanupUnusedPatterns(ctx context.Context, arg CleanupUnusedPatternsParams) error
 	ClearExpiredWorkingMemory(ctx context.Context) error
 	ClearWorkingMemorySlot(ctx context.Context, arg ClearWorkingMemorySlotParams) error
@@ -38,6 +39,8 @@ type Querier interface {
 	ConsolidateMemoryEntries(ctx context.Context, arg ConsolidateMemoryEntriesParams) ([]*ConsolidateMemoryEntriesRow, error)
 	ConsolidateWorkingMemory(ctx context.Context, arg ConsolidateWorkingMemoryParams) ([]*ConsolidateWorkingMemoryRow, error)
 	CountActiveUsers(ctx context.Context) (int64, error)
+	// Count embeddings by content type
+	CountEmbeddingsByType(ctx context.Context, contentType string) (int64, error)
 	// =====================================================
 	// AGENT COLLABORATIONS QUERIES
 	// =====================================================
@@ -147,6 +150,12 @@ type Querier interface {
 	DeleteDecayedMemories(ctx context.Context, arg DeleteDecayedMemoriesParams) error
 	DeleteEmbedding(ctx context.Context, arg DeleteEmbeddingParams) error
 	DeleteEmbeddingByID(ctx context.Context, id pgtype.UUID) error
+	// Delete all embeddings for a specific content type
+	DeleteEmbeddingsByContentType(ctx context.Context, contentType string) error
+	// Delete embeddings matching specific metadata criteria
+	DeleteEmbeddingsByMetadata(ctx context.Context, dollar_1 []byte) error
+	// Delete embeddings older than a specific date
+	DeleteExpiredEmbeddings(ctx context.Context, arg DeleteExpiredEmbeddingsParams) error
 	// Deletes expired memory entries and returns count
 	DeleteExpiredMemoryEntries(ctx context.Context) (int64, error)
 	DeleteExpiredToolCache(ctx context.Context) error
@@ -215,6 +224,8 @@ type Querier interface {
 	GetEmbedding(ctx context.Context, arg GetEmbeddingParams) (*Embedding, error)
 	GetEmbeddingByID(ctx context.Context, id pgtype.UUID) (*Embedding, error)
 	GetEmbeddingCount(ctx context.Context, contentType string) (int64, error)
+	// Get statistics about embeddings grouped by content type
+	GetEmbeddingStats(ctx context.Context) ([]*GetEmbeddingStatsRow, error)
 	GetEmbeddingsByType(ctx context.Context, arg GetEmbeddingsByTypeParams) ([]*Embedding, error)
 	GetEntityEvolutionHistory(ctx context.Context, dollar_1 pgtype.UUID) ([]*KnowledgeEvolution, error)
 	GetEpisodicMemories(ctx context.Context, arg GetEpisodicMemoriesParams) ([]*EpisodicMemory, error)
@@ -288,7 +299,7 @@ type Querier interface {
 	GetRecentAgentExecutions(ctx context.Context, arg GetRecentAgentExecutionsParams) ([]*AgentExecution, error)
 	GetRecentChainExecutions(ctx context.Context, arg GetRecentChainExecutionsParams) ([]*ChainExecution, error)
 	GetRecentChanges(ctx context.Context, arg GetRecentChangesParams) ([]*GetRecentChangesRow, error)
-	GetRecentConversations(ctx context.Context, arg GetRecentConversationsParams) ([]*GetRecentConversationsRow, error)
+	GetRecentConversations(ctx context.Context, arg GetRecentConversationsParams) ([]*Conversation, error)
 	GetRecentEvents(ctx context.Context, arg GetRecentEventsParams) ([]*SystemEvent, error)
 	GetRecentMessages(ctx context.Context, arg GetRecentMessagesParams) ([]*GetRecentMessagesRow, error)
 	GetRecentToolExecutions(ctx context.Context, arg GetRecentToolExecutionsParams) ([]*ToolExecution, error)
@@ -348,7 +359,9 @@ type Querier interface {
 	RemoveFavoriteTool(ctx context.Context, arg RemoveFavoriteToolParams) (*RemoveFavoriteToolRow, error)
 	ResetProjection(ctx context.Context, projectionName string) (*EventProjection, error)
 	SearchCodePatterns(ctx context.Context, arg SearchCodePatternsParams) ([]*CodePattern, error)
-	SearchConversations(ctx context.Context, arg SearchConversationsParams) ([]*SearchConversationsRow, error)
+	SearchConversations(ctx context.Context, arg SearchConversationsParams) ([]*Conversation, error)
+	// Search embeddings with metadata filtering
+	SearchEmbeddingsByTypeWithMetadata(ctx context.Context, arg SearchEmbeddingsByTypeWithMetadataParams) ([]*SearchEmbeddingsByTypeWithMetadataRow, error)
 	SearchEpisodicMemoriesBySimilarity(ctx context.Context, arg SearchEpisodicMemoriesBySimilarityParams) ([]*SearchEpisodicMemoriesBySimilarityRow, error)
 	SearchKnowledgeNodesByName(ctx context.Context, arg SearchKnowledgeNodesByNameParams) ([]*KnowledgeNode, error)
 	SearchKnowledgeNodesBySimilarity(ctx context.Context, arg SearchKnowledgeNodesBySimilarityParams) ([]*SearchKnowledgeNodesBySimilarityRow, error)
@@ -362,14 +375,17 @@ type Querier interface {
 	SearchSimilarEmbeddings(ctx context.Context, arg SearchSimilarEmbeddingsParams) ([]*SearchSimilarEmbeddingsRow, error)
 	SearchSimilarEmbeddingsAllTypes(ctx context.Context, arg SearchSimilarEmbeddingsAllTypesParams) ([]*SearchSimilarEmbeddingsAllTypesRow, error)
 	SearchUsers(ctx context.Context, arg SearchUsersParams) ([]*SearchUsersRow, error)
+	// Additional conversation queries that were missing
 	UnarchiveConversation(ctx context.Context, id pgtype.UUID) error
 	UpdateAgentCapabilities(ctx context.Context, arg UpdateAgentCapabilitiesParams) (*AgentDefinition, error)
 	UpdateAgentPerformance(ctx context.Context, arg UpdateAgentPerformanceParams) (*AgentDefinition, error)
 	UpdateAutomationConfidence(ctx context.Context, arg UpdateAutomationConfidenceParams) (*ProceduralMemory, error)
 	UpdateCollaborationExecution(ctx context.Context, arg UpdateCollaborationExecutionParams) (*AgentCollaboration, error)
-	UpdateConversation(ctx context.Context, arg UpdateConversationParams) (*UpdateConversationRow, error)
+	UpdateConversation(ctx context.Context, arg UpdateConversationParams) (*Conversation, error)
 	UpdateConversationSummary(ctx context.Context, arg UpdateConversationSummaryParams) error
 	UpdateEmbedding(ctx context.Context, arg UpdateEmbeddingParams) (*Embedding, error)
+	// Update metadata for a specific embedding
+	UpdateEmbeddingMetadata(ctx context.Context, arg UpdateEmbeddingMetadataParams) error
 	UpdateEpisodicMemoryAccess(ctx context.Context, id pgtype.UUID) (*EpisodicMemory, error)
 	UpdateEpisodicMemoryImportance(ctx context.Context, arg UpdateEpisodicMemoryImportanceParams) (*EpisodicMemory, error)
 	UpdateKnowledgeEdgeStrength(ctx context.Context, arg UpdateKnowledgeEdgeStrengthParams) (*KnowledgeEdge, error)

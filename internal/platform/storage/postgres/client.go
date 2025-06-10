@@ -18,10 +18,10 @@ import (
 
 // Client represents a PostgreSQL client
 type Client struct {
-	pool   *pgxpool.Pool
-	config config.DatabaseConfig
-	logger *slog.Logger
-	sqlc   *SQLCClient
+	pool    *pgxpool.Pool
+	config  config.DatabaseConfig
+	logger  *slog.Logger
+	queries *sqlc.Queries
 }
 
 // Ensure Client implements the new interfaces
@@ -57,10 +57,10 @@ func NewClient(ctx context.Context, cfg config.DatabaseConfig) (*Client, error) 
 		"application_name": "goassistant",
 		"timezone":         "UTC",
 		// PostgreSQL 17 performance optimizations
-		"track_io_timing":            "on",                 // Enable I/O timing for EXPLAIN ANALYZE
-		"log_statement_stats":        "off",                // Use pg_stat_statements instead
-		"log_min_duration_statement": "1000",               // Log slow queries (1s+)
-		"shared_preload_libraries":   "pg_stat_statements", // Enable query statistics
+		"track_io_timing":            "on",   // Enable I/O timing for EXPLAIN ANALYZE
+		"log_statement_stats":        "off",  // Use pg_stat_statements instead
+		"log_min_duration_statement": "1000", // Log slow queries (1s+)
+		// Note: shared_preload_libraries cannot be set at runtime, must be configured in postgresql.conf
 	}
 
 	// Enable logging if configured
@@ -85,10 +85,10 @@ func NewClient(ctx context.Context, cfg config.DatabaseConfig) (*Client, error) 
 	logger := slog.Default()
 
 	client := &Client{
-		pool:   pool,
-		config: cfg,
-		logger: logger,
-		sqlc:   NewSQLCClient(pool, logger),
+		pool:    pool,
+		config:  cfg,
+		logger:  logger,
+		queries: sqlc.New(pool),
 	}
 
 	return client, nil
@@ -104,10 +104,7 @@ func (c *Client) Close() error {
 
 // GetQueries returns the underlying sqlc.Queries for direct access
 func (c *Client) GetQueries() *sqlc.Queries {
-	if c.sqlc != nil {
-		return c.sqlc.GetQueries()
-	}
-	return nil
+	return c.queries
 }
 
 // Pool returns the underlying connection pool

@@ -11,20 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const ArchiveConversation = `-- name: ArchiveConversation :exec
-
-UPDATE conversations
-SET is_archived = true,
-    updated_at = NOW()
-WHERE id = $1
-`
-
-// Additional conversation queries that were missing
-func (q *Queries) ArchiveConversation(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, ArchiveConversation, id)
-	return err
-}
-
 const GetActiveConversations = `-- name: GetActiveConversations :many
 SELECT id, user_id, title, summary, metadata, is_archived, created_at, updated_at
 FROM conversations
@@ -104,12 +90,14 @@ func (q *Queries) GetArchivedConversations(ctx context.Context, userID pgtype.UU
 }
 
 const UnarchiveConversation = `-- name: UnarchiveConversation :exec
+
 UPDATE conversations
 SET is_archived = false,
     updated_at = NOW()
 WHERE id = $1
 `
 
+// Additional conversation queries that were missing
 func (q *Queries) UnarchiveConversation(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, UnarchiveConversation, id)
 	return err

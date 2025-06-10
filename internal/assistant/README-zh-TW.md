@@ -1,663 +1,375 @@
-# Assistant 智能助手核心
+# 🤖 Assistant Package - 智慧助理核心套件
 
-這個包實現了 Assistant 的核心功能，提供智能開發伴侶的主要交互介面和處理邏輯。
+## 📋 概述
 
-## 架構概述
+Assistant 套件是整個智慧開發助理系統的核心，負責協調 AI 服務、處理使用者互動，並管理整個對話生命週期。這個套件實現了智慧助理的主要邏輯，包括即時串流回應、上下文管理、錯誤處理等關鍵功能。
 
-Assistant 核心採用分層架構，結合智能代理和語義理解：
+## 🏗️ 架構設計
 
-```
-assistant/
-├── assistant.go          # 主要助手介面
-├── processor.go          # 查詢處理器
-├── context.go            # 上下文管理
-├── errors.go             # 錯誤定義和處理
-├── assistant_test.go     # 單元測試
-└── *_fuzzing_test.go     # 模糊測試（Go 1.18+）
-```
-
-## 設計理念
-
-### 🧠 智能理解
-Assistant 不僅執行命令，更能理解開發意圖：
-- **語義分析**: 理解查詢背後的真實需求
-- **上下文感知**: 基於當前項目狀態調整回應
-- **學習適應**: 從用戶交互中學習偏好和模式
-
-### 🤝 協作智能
-多個智能代理協作提供全面支援：
-- **開發代理**: 程式碼理解、重構建議、最佳實踐
-- **資料庫代理**: 查詢優化、架構分析、性能建議
-- **基礎設施代理**: 部署管理、資源優化、故障診斷
-
-### 📚 持續學習
-系統隨使用而進化：
-- **模式識別**: 自動識別開發模式和工作流
-- **偏好學習**: 記住用戶的工具和方法偏好
-- **知識累積**: 建立個人化的開發知識庫
-
-## 核心介面
-
-### Assistant 主介面
+### 核心組件
 
 ```go
-// Assistant 提供智能開發伴侶的主要功能
-type Assistant interface {
-    // 處理用戶查詢並返回智能回應
-    Query(ctx context.Context, req *QueryRequest) (*QueryResponse, error)
-    
-    // 獲取對話歷史和上下文
-    GetConversation(ctx context.Context, id string) (*Conversation, error)
-    
-    // 創建新的對話會話
-    CreateConversation(ctx context.Context, userID string, title string) (*Conversation, error)
-    
-    // 獲取可用工具列表
-    GetAvailableTools(ctx context.Context) ([]ToolInfo, error)
-    
-    // 執行特定工具
-    ExecuteTool(ctx context.Context, toolName string, input ToolInput) (*ToolResult, error)
-    
-    // 獲取學習統計
-    GetLearningStats(ctx context.Context, userID string) (*LearningStats, error)
-    
-    // 關閉助手並清理資源
-    Close(ctx context.Context) error
+// Assistant 是系統的主要入口點
+type Assistant struct {
+    ai           AIService          // AI 服務介面（支援 Claude、Gemini）
+    toolRegistry *tools.Registry    // 工具註冊表
+    processor    *Processor         // 訊息處理器
+    stream       *StreamProcessor   // 串流處理器
+    ctx          context.Context    // 上下文管理
+    logger       *slog.Logger       // 結構化日誌
+    config       *Config           // 配置管理
 }
 ```
 
-### 查詢請求和回應
+### 主要介面
 
 ```go
-// QueryRequest 表示用戶查詢請求
-type QueryRequest struct {
-    Query          string    `json:"query" validate:"required,min=1"`
-    ConversationID *string   `json:"conversation_id,omitempty"`
-    UserID         string    `json:"user_id" validate:"required"`
-    Context        *Context  `json:"context,omitempty"`
-    Preferences    *UserPreferences `json:"preferences,omitempty"`
-}
-
-// QueryResponse 表示助手的智能回應
-type QueryResponse struct {
-    ID             string           `json:"id"`
-    Response       string           `json:"response"`
-    ConversationID string           `json:"conversation_id"`
-    ToolsUsed      []ToolExecution  `json:"tools_used,omitempty"`
-    Suggestions    []Suggestion     `json:"suggestions,omitempty"`
-    Confidence     float64          `json:"confidence"`
-    ProcessingTime time.Duration    `json:"processing_time"`
-    LearningData   *LearningData    `json:"learning_data,omitempty"`
+// Service 定義了助理服務的核心功能
+type Service interface {
+    // ProcessQuery 處理使用者查詢並返回回應
+    ProcessQuery(ctx context.Context, req QueryRequest) (*QueryResponse, error)
+    
+    // ProcessStream 處理串流查詢，支援即時回應
+    ProcessStream(ctx context.Context, req QueryRequest) (<-chan StreamChunk, error)
+    
+    // GetCapabilities 返回助理的能力描述
+    GetCapabilities() Capabilities
 }
 ```
 
-## 處理器架構
+## 🔧 核心功能
 
-### QueryProcessor 智能處理
+### 1. 查詢處理 (Query Processing)
 
+Assistant 提供兩種查詢處理模式：
+
+#### 同步模式
 ```go
-// QueryProcessor 處理查詢並協調各種智能代理
-type QueryProcessor struct {
-    // AI 提供者
-    aiProvider    ai.Provider
-    
-    // 智能代理管理
-    agentManager  *agents.Manager
-    
-    // 工具註冊表
-    toolRegistry  *tools.Registry
-    
-    // 記憶系統
-    memorySystem  *memory.System
-    
-    // 學習引擎
-    learningEngine *learning.Engine
-    
-    // 上下文引擎
-    contextEngine *context.Engine
-}
+// 適用於簡單查詢或不需要即時回饋的場景
+response, err := assistant.ProcessQuery(ctx, QueryRequest{
+    Query:   "解釋這段程式碼的功能",
+    Context: map[string]interface{}{
+        "code": codeSnippet,
+        "language": "go",
+    },
+})
+```
 
-func (p *QueryProcessor) ProcessQuery(ctx context.Context, req *QueryRequest) (*QueryResponse, error) {
-    // 1. 豐富上下文訊息
-    enrichedContext := p.contextEngine.EnrichContext(req.Context)
-    
-    // 2. 分析查詢意圖
-    intent, err := p.analyzeIntent(req.Query, enrichedContext)
-    if err != nil {
-        return nil, fmt.Errorf("intent analysis failed: %w", err)
-    }
-    
-    // 3. 選擇相關代理和工具
-    agents := p.agentManager.SelectAgents(intent)
-    tools := p.toolRegistry.SelectTools(intent)
-    
-    // 4. 執行協作處理
-    result, err := p.executeCollaborative(ctx, intent, agents, tools)
-    if err != nil {
-        return nil, fmt.Errorf("collaborative execution failed: %w", err)
-    }
-    
-    // 5. 學習和記憶存儲
-    p.learningEngine.LearnFromInteraction(req, result)
-    p.memorySystem.StoreEpisode(req, result)
-    
-    return result, nil
+#### 串流模式
+```go
+// 適用於長回應或需要即時回饋的場景
+stream, err := assistant.ProcessStream(ctx, QueryRequest{
+    Query: "幫我重構這個複雜的函數",
+})
+
+for chunk := range stream {
+    // 即時處理每個回應片段
+    fmt.Print(chunk.Content)
 }
 ```
 
-### 意圖分析
+### 2. 工具整合 (Tool Integration)
+
+Assistant 可以動態調用各種開發工具：
 
 ```go
-// IntentAnalyzer 分析用戶查詢的真實意圖
-type IntentAnalyzer struct {
-    nlpModel     *nlp.Model
-    patternMatcher *patterns.Matcher
-    contextAnalyzer *context.Analyzer
-}
-
-func (ia *IntentAnalyzer) AnalyzeIntent(query string, context *Context) (*Intent, error) {
-    // 自然語言處理
-    nlpResult := ia.nlpModel.Process(query)
-    
-    // 模式匹配
-    patterns := ia.patternMatcher.FindPatterns(query)
-    
-    // 上下文分析
-    contextClues := ia.contextAnalyzer.ExtractClues(context)
-    
-    // 綜合分析
-    intent := &Intent{
-        Primary:     ia.determinePrimaryIntent(nlpResult, patterns),
-        Secondary:   ia.determineSecondaryIntents(nlpResult, patterns),
-        Confidence:  ia.calculateConfidence(nlpResult, patterns, contextClues),
-        Context:     contextClues,
-        Entities:    nlpResult.Entities,
-        Keywords:    nlpResult.Keywords,
-    }
-    
-    return intent, nil
-}
+// 工具執行流程
+1. 解析使用者意圖
+2. 選擇適當的工具
+3. 準備工具參數
+4. 執行工具
+5. 處理工具結果
+6. 生成最終回應
 ```
 
-## 上下文管理
+支援的工具類型：
+- **Go 開發工具**：程式碼分析、測試生成、重構建議
+- **Docker 工具**：映像優化、容器管理
+- **PostgreSQL 工具**：查詢優化、架構分析
+- **基礎設施工具**：K8s 配置、CI/CD 設定
 
-### Context 智能上下文
+### 3. 上下文管理 (Context Management)
+
+Assistant 維護豐富的上下文資訊：
 
 ```go
-// Context 表示當前開發環境的智能上下文
 type Context struct {
-    // 工作空間訊息
-    Workspace *WorkspaceContext `json:"workspace,omitempty"`
+    // 使用者上下文
+    UserID       string
+    Preferences  UserPreferences
     
-    // 當前項目狀態
-    Project *ProjectContext `json:"project,omitempty"`
+    // 專案上下文  
+    ProjectType  string
+    Language     string
+    Frameworks   []string
     
-    // 用戶狀態
-    User *UserContext `json:"user,omitempty"`
+    // 對話上下文
+    History      []Message
+    CurrentTopic string
     
-    // 環境訊息
-    Environment *EnvironmentContext `json:"environment,omitempty"`
-    
-    // 時間上下文
-    Temporal *TemporalContext `json:"temporal,omitempty"`
-}
-
-// WorkspaceContext 工作空間上下文
-type WorkspaceContext struct {
-    RootPath        string              `json:"root_path"`
-    OpenFiles       []string            `json:"open_files"`
-    ModifiedFiles   []string            `json:"modified_files"`
-    GitStatus       *GitStatus          `json:"git_status,omitempty"`
-    BuildStatus     *BuildStatus        `json:"build_status,omitempty"`
-    TestResults     *TestResults        `json:"test_results,omitempty"`
-    Dependencies    []Dependency        `json:"dependencies"`
-    Configuration   map[string]any      `json:"configuration"`
-}
-
-// ProjectContext 項目上下文
-type ProjectContext struct {
-    Name            string              `json:"name"`
-    Type            string              `json:"type"`
-    Language        string              `json:"language"`
-    Framework       string              `json:"framework,omitempty"`
-    Architecture    *ArchitectureInfo   `json:"architecture,omitempty"`
-    Patterns        []PatternUsage      `json:"patterns"`
-    Conventions     *CodingConventions  `json:"conventions,omitempty"`
+    // 系統上下文
+    Timestamp    time.Time
+    RequestID    string
 }
 ```
 
-### 上下文引擎
+### 4. 錯誤處理 (Error Handling)
+
+採用分層錯誤處理策略：
 
 ```go
-// ContextEngine 管理和豐富上下文訊息
-type ContextEngine struct {
-    workspaceAnalyzer *workspace.Analyzer
-    projectAnalyzer   *project.Analyzer
-    gitAnalyzer       *git.Analyzer
-    environmentDetector *env.Detector
-}
+// 錯誤類型
+type ErrorType string
 
-func (ce *ContextEngine) EnrichContext(baseContext *Context) *Context {
-    if baseContext == nil {
-        baseContext = &Context{}
+const (
+    ErrorTypeValidation   ErrorType = "validation"    // 輸入驗證錯誤
+    ErrorTypeAI          ErrorType = "ai"            // AI 服務錯誤
+    ErrorTypeTool        ErrorType = "tool"          // 工具執行錯誤
+    ErrorTypeRateLimit   ErrorType = "rate_limit"   // 速率限制錯誤
+    ErrorTypeInternal    ErrorType = "internal"     // 內部錯誤
+)
+
+// 智慧錯誤處理
+func (a *Assistant) handleError(err error) error {
+    switch e := err.(type) {
+    case *AIError:
+        // 嘗試使用備用 AI 提供者
+        return a.fallbackToAlternativeAI()
+    case *ToolError:
+        // 提供替代建議
+        return a.suggestAlternativeTool(e)
+    default:
+        // 記錄並包裝錯誤
+        return fmt.Errorf("assistant error: %w", err)
     }
-    
-    // 豐富工作空間訊息
-    if baseContext.Workspace == nil {
-        baseContext.Workspace = ce.workspaceAnalyzer.AnalyzeWorkspace()
-    }
-    
-    // 豐富項目訊息
-    if baseContext.Project == nil {
-        baseContext.Project = ce.projectAnalyzer.AnalyzeProject(baseContext.Workspace)
-    }
-    
-    // 豐富 Git 訊息
-    if baseContext.Workspace.GitStatus == nil {
-        baseContext.Workspace.GitStatus = ce.gitAnalyzer.GetStatus()
-    }
-    
-    // 豐富環境訊息
-    if baseContext.Environment == nil {
-        baseContext.Environment = ce.environmentDetector.Detect()
-    }
-    
-    return baseContext
 }
 ```
 
-## 錯誤處理
+## 📊 進階功能
 
-### 智能錯誤系統
+### 1. 處理器架構 (Processor Architecture)
+
+Processor 負責訊息的預處理和後處理：
 
 ```go
-// AssistantError 智能錯誤類型
-type AssistantError struct {
-    Code    string                 `json:"code"`
-    Message string                 `json:"message"`
-    Cause   error                  `json:"-"`
-    Context map[string]interface{} `json:"context,omitempty"`
+type Processor struct {
+    validators   []Validator    // 輸入驗證器
+    enrichers    []Enricher     // 上下文豐富器
+    transformers []Transformer  // 回應轉換器
+    filters      []Filter       // 內容過濾器
+}
+
+// 處理流程
+func (p *Processor) Process(msg Message) (ProcessedMessage, error) {
+    // 1. 驗證輸入
+    if err := p.validate(msg); err != nil {
+        return ProcessedMessage{}, err
+    }
     
-    // 智能功能
-    Suggestions []Suggestion       `json:"suggestions,omitempty"`
-    Recovery    *RecoveryPlan      `json:"recovery,omitempty"`
-    Learning    *LearningOpportunity `json:"learning,omitempty"`
-}
-
-// Suggestion 智能建議
-type Suggestion struct {
-    Type        string  `json:"type"`
-    Title       string  `json:"title"`
-    Description string  `json:"description"`
-    Action      string  `json:"action,omitempty"`
-    Confidence  float64 `json:"confidence"`
-}
-
-// RecoveryPlan 恢復計劃
-type RecoveryPlan struct {
-    Steps       []RecoveryStep `json:"steps"`
-    Automated   bool          `json:"automated"`
-    Confidence  float64       `json:"confidence"`
+    // 2. 豐富上下文
+    enriched := p.enrich(msg)
+    
+    // 3. 執行主要處理
+    result := p.execute(enriched)
+    
+    // 4. 轉換回應
+    transformed := p.transform(result)
+    
+    // 5. 過濾敏感內容
+    return p.filter(transformed), nil
 }
 ```
 
-### 錯誤處理最佳實踐
+### 2. 串流處理器 (Stream Processor)
+
+處理即時串流回應的複雜邏輯：
 
 ```go
-// 智能錯誤處理示例
-func (p *QueryProcessor) handleError(err error, context *Context) *AssistantError {
-    assistantErr := &AssistantError{
-        Code:    determineErrorCode(err),
-        Message: err.Error(),
-        Cause:   err,
-        Context: make(map[string]interface{}),
-    }
-    
-    // 基於上下文生成建議
-    assistantErr.Suggestions = p.generateSuggestions(err, context)
-    
-    // 生成恢復計劃
-    assistantErr.Recovery = p.generateRecoveryPlan(err, context)
-    
-    // 識別學習機會
-    assistantErr.Learning = p.identifyLearningOpportunity(err, context)
-    
-    return assistantErr
+type StreamProcessor struct {
+    bufferSize   int              // 緩衝區大小
+    timeout      time.Duration    // 逾時設定
+    interceptors []Interceptor    // 串流攔截器
 }
 
-func (p *QueryProcessor) generateSuggestions(err error, context *Context) []Suggestion {
-    suggestions := make([]Suggestion, 0)
-    
-    // 基於錯誤類型生成建議
-    switch {
-    case errors.Is(err, ErrToolNotFound):
-        suggestions = append(suggestions, Suggestion{
-            Type:        "tool_install",
-            Title:       "安裝缺失的工具",
-            Description: "所需的工具似乎未安裝或不可用",
-            Action:      "make setup",
-            Confidence:  0.8,
-        })
-    case errors.Is(err, ErrInvalidInput):
-        suggestions = append(suggestions, Suggestion{
-            Type:        "input_validation",
-            Title:       "檢查輸入格式",
-            Description: "輸入格式可能不正確，請檢查文檔",
-            Confidence:  0.9,
-        })
-    }
-    
-    return suggestions
-}
+// 串流處理特性
+- 自動緩衝管理
+- 錯誤恢復機制
+- 進度追蹤
+- 取消支援
+- 背壓處理
 ```
 
-## 學習系統集成
+### 3. 能力管理 (Capabilities Management)
 
-### 學習數據收集
+動態管理和報告助理能力：
 
 ```go
-// LearningData 學習數據結構
-type LearningData struct {
-    UserID         string                 `json:"user_id"`
-    SessionID      string                 `json:"session_id"`
-    Query          string                 `json:"query"`
-    Intent         *Intent                `json:"intent"`
-    Response       string                 `json:"response"`
-    ToolsUsed      []ToolExecution        `json:"tools_used"`
-    Success        bool                   `json:"success"`
-    UserFeedback   *UserFeedback          `json:"user_feedback,omitempty"`
-    Context        *Context               `json:"context"`
-    ProcessingTime time.Duration          `json:"processing_time"`
-    Confidence     float64                `json:"confidence"`
-}
-
-// UserFeedback 用戶反饋
-type UserFeedback struct {
-    Rating      int    `json:"rating"`      // 1-5 星評分
-    Helpful     bool   `json:"helpful"`     // 是否有幫助
-    Accurate    bool   `json:"accurate"`    // 是否準確
-    Comments    string `json:"comments,omitempty"`
-    Improvements []string `json:"improvements,omitempty"`
-}
-
-func (a *assistant) collectLearningData(req *QueryRequest, resp *QueryResponse, feedback *UserFeedback) {
-    learningData := &LearningData{
-        UserID:         req.UserID,
-        SessionID:      req.ConversationID,
-        Query:          req.Query,
-        Response:       resp.Response,
-        ToolsUsed:      resp.ToolsUsed,
-        Success:        resp.Confidence > 0.7,
-        UserFeedback:   feedback,
-        Context:        req.Context,
-        ProcessingTime: resp.ProcessingTime,
-        Confidence:     resp.Confidence,
-    }
+type Capabilities struct {
+    // AI 能力
+    SupportedModels   []string
+    MaxTokens         int
+    StreamingSupport  bool
     
-    // 異步存儲學習數據
-    go a.learningEngine.Store(learningData)
+    // 工具能力
+    AvailableTools    []ToolInfo
+    ToolIntegrations  map[string]bool
+    
+    // 語言支援
+    ProgrammingLangs  []string
+    NaturalLangs      []string
+    
+    // 特殊功能
+    Features          []Feature
 }
 ```
 
-## 性能優化
+## 🔍 使用範例
 
-### 並發處理
-
+### 基本使用
 ```go
-// ConcurrentProcessor 並發查詢處理器
-type ConcurrentProcessor struct {
-    *QueryProcessor
-    
-    // 並發控制
-    semaphore    chan struct{}
-    workerPool   *WorkerPool
-    requestQueue chan *ProcessingRequest
-}
+// 創建助理實例
+assistant := assistant.New(
+    assistant.WithAIService(aiService),
+    assistant.WithTools(toolRegistry),
+    assistant.WithLogger(logger),
+)
 
-type ProcessingRequest struct {
-    Request  *QueryRequest
-    Response chan *ProcessingResult
-    Context  context.Context
-}
-
-type ProcessingResult struct {
-    Response *QueryResponse
-    Error    error
-}
-
-func (cp *ConcurrentProcessor) ProcessQueryConcurrent(ctx context.Context, req *QueryRequest) (*QueryResponse, error) {
-    // 創建處理請求
-    processingReq := &ProcessingRequest{
-        Request:  req,
-        Response: make(chan *ProcessingResult, 1),
-        Context:  ctx,
-    }
-    
-    // 提交到隊列
-    select {
-    case cp.requestQueue <- processingReq:
-    case <-ctx.Done():
-        return nil, ctx.Err()
-    }
-    
-    // 等待結果
-    select {
-    case result := <-processingReq.Response:
-        return result.Response, result.Error
-    case <-ctx.Done():
-        return nil, ctx.Err()
-    }
-}
+// 處理查詢
+response, err := assistant.ProcessQuery(ctx, QueryRequest{
+    Query: "幫我優化這個 SQL 查詢",
+    Context: map[string]interface{}{
+        "sql": "SELECT * FROM users WHERE status = 'active'",
+    },
+})
 ```
 
-### 緩存策略
-
+### 進階使用
 ```go
-// CacheManager 智能緩存管理器
-type CacheManager struct {
-    queryCache    *cache.LRU[string, *QueryResponse]
-    contextCache  *cache.LRU[string, *Context]
-    intentCache   *cache.LRU[string, *Intent]
-    
-    // 緩存統計
-    stats *CacheStats
-}
+// 使用串流處理複雜任務
+stream, err := assistant.ProcessStream(ctx, QueryRequest{
+    Query: "分析整個專案的程式碼品質並提供改進建議",
+    Options: QueryOptions{
+        IncludeCodeAnalysis: true,
+        IncludeTestCoverage: true,
+        IncludePerformance:  true,
+    },
+})
 
-func (cm *CacheManager) GetCachedResponse(req *QueryRequest) (*QueryResponse, bool) {
-    // 生成緩存鍵
-    key := cm.generateCacheKey(req)
-    
-    // 檢查緩存
-    if response, exists := cm.queryCache.Get(key); exists {
-        // 檢查緩存是否仍然有效
-        if cm.isCacheValid(response, req.Context) {
-            cm.stats.RecordHit()
-            return response, true
-        }
-        // 緩存失效，移除
-        cm.queryCache.Remove(key)
-    }
-    
-    cm.stats.RecordMiss()
-    return nil, false
-}
-
-func (cm *CacheManager) CacheResponse(req *QueryRequest, resp *QueryResponse) {
-    key := cm.generateCacheKey(req)
-    
-    // 只緩存高信心度的回應
-    if resp.Confidence >= 0.8 {
-        cm.queryCache.Set(key, resp)
+// 處理串流回應
+for chunk := range stream {
+    switch chunk.Type {
+    case ChunkTypeProgress:
+        fmt.Printf("進度: %s\n", chunk.Progress)
+    case ChunkTypeContent:
+        fmt.Print(chunk.Content)
+    case ChunkTypeError:
+        log.Error("串流錯誤", "error", chunk.Error)
     }
 }
 ```
 
-## 配置和定制
+## 🧪 測試策略
 
-### Assistant 配置
+### 單元測試
+```go
+// 測試基本功能
+func TestAssistant_ProcessQuery(t *testing.T) {
+    // 使用模擬 AI 服務
+    mockAI := NewMockAIService()
+    assistant := assistant.New(
+        assistant.WithAIService(mockAI),
+    )
+    
+    // 測試各種場景
+    testCases := []struct {
+        name     string
+        query    QueryRequest
+        expected QueryResponse
+    }{
+        // ... 測試案例
+    }
+}
+```
+
+### 整合測試
+```go
+// 測試完整工作流程
+func TestAssistant_Integration(t *testing.T) {
+    // 使用真實服務但模擬外部依賴
+    assistant := setupTestAssistant(t)
+    
+    // 測試複雜互動
+    // ... 整合測試邏輯
+}
+```
+
+## 🔧 配置選項
 
 ```yaml
 assistant:
-  # 核心設置
-  name: "Assistant"
-  version: "1.0.0"
-  
-  # 處理器設置
+  # AI 配置
+  ai:
+    primary_provider: claude
+    fallback_provider: gemini
+    max_retries: 3
+    timeout: 30s
+    
+  # 處理器配置
   processor:
-    max_concurrent_queries: 10
-    query_timeout: 30s
-    context_enrichment: true
-    learning_enabled: true
-  
-  # 緩存設置
-  cache:
-    query_cache_size: 1000
-    context_cache_size: 500
-    intent_cache_size: 200
+    max_context_size: 8192
+    enable_caching: true
     cache_ttl: 1h
-  
-  # 學習設置
-  learning:
-    enabled: true
-    retention_days: 90
-    feedback_required: false
-    pattern_detection: true
-  
-  # 智能代理設置
-  agents:
-    development:
-      enabled: true
-      confidence_threshold: 0.7
-    database:
-      enabled: true
-      confidence_threshold: 0.8
-    infrastructure:
-      enabled: true
-      confidence_threshold: 0.6
-```
-
-## 最佳實踐
-
-### 1. 查詢設計
-
-```go
-// 良好的查詢請求設計
-req := &QueryRequest{
-    Query:   "Analyze the performance of this SQL query",
-    UserID:  userID,
-    Context: &Context{
-        Workspace: currentWorkspace,
-        Project:   currentProject,
-    },
-    Preferences: &UserPreferences{
-        Verbosity:    "detailed",
-        Language:     "en",
-        ExpertMode:   true,
-    },
-}
-
-// 處理回應
-resp, err := assistant.Query(ctx, req)
-if err != nil {
-    // 檢查是否為 AssistantError
-    if assistantErr := GetAssistantError(err); assistantErr != nil {
-        // 顯示建議
-        for _, suggestion := range assistantErr.Suggestions {
-            fmt.Printf("建議: %s\n", suggestion.Description)
-        }
-    }
-    return fmt.Errorf("query failed: %w", err)
-}
-
-// 處理建議
-for _, suggestion := range resp.Suggestions {
-    fmt.Printf("建議: %s (信心度: %.2f)\n", suggestion.Description, suggestion.Confidence)
-}
-```
-
-### 2. 錯誤處理
-
-```go
-// 智能錯誤處理
-func handleAssistantError(err error) {
-    assistantErr := GetAssistantError(err)
-    if assistantErr == nil {
-        log.Printf("未預期的錯誤: %v", err)
-        return
-    }
     
-    // 顯示用戶友好的錯誤訊息
-    fmt.Printf("錯誤: %s\n", assistantErr.Message)
+  # 串流配置
+  streaming:
+    buffer_size: 1024
+    chunk_size: 256
+    enable_compression: true
     
-    // 顯示建議
-    for _, suggestion := range assistantErr.Suggestions {
-        fmt.Printf("💡 %s\n", suggestion.Description)
-        if suggestion.Action != "" {
-            fmt.Printf("   執行: %s\n", suggestion.Action)
-        }
-    }
-    
-    // 如果有自動恢復計劃
-    if assistantErr.Recovery != nil && assistantErr.Recovery.Automated {
-        fmt.Printf("🔄 嘗試自動恢復...\n")
-        executeRecoveryPlan(assistantErr.Recovery)
-    }
-}
+  # 安全配置
+  security:
+    enable_content_filtering: true
+    sensitive_data_detection: true
+    audit_logging: true
 ```
 
-### 3. 性能監控
+## 📈 效能考量
 
-```go
-// 性能監控中間件
-func (a *assistant) withMetrics(next QueryHandler) QueryHandler {
-    return func(ctx context.Context, req *QueryRequest) (*QueryResponse, error) {
-        start := time.Now()
-        
-        // 執行查詢
-        resp, err := next(ctx, req)
-        
-        // 記錄指標
-        duration := time.Since(start)
-        a.metrics.RecordQuery(req.UserID, duration, err == nil)
-        
-        // 記錄詳細性能數據
-        if resp != nil {
-            a.metrics.RecordConfidence(resp.Confidence)
-            a.metrics.RecordToolUsage(resp.ToolsUsed)
-        }
-        
-        return resp, err
-    }
-}
-```
+1. **記憶體管理**
+   - 使用物件池減少 GC 壓力
+   - 限制上下文大小防止記憶體溢出
+   - 定期清理過期快取
 
-## 故障排除
+2. **並發處理**
+   - 使用 goroutine 池控制並發數
+   - 實現優雅關閉機制
+   - 避免 goroutine 洩漏
 
-### 常見問題
+3. **錯誤恢復**
+   - 實現斷路器模式
+   - 自動重試機制
+   - 降級策略
 
-1. **查詢處理緩慢**
-   - 檢查工具執行時間
-   - 優化上下文分析
-   - 調整並發設置
+## 🚀 未來規劃
 
-2. **回應質量不佳**
-   - 增加上下文訊息
-   - 調整代理選擇策略
-   - 提供用戶反饋
+1. **智慧增強**
+   - 實現自適應學習
+   - 個性化回應風格
+   - 預測性協助
 
-3. **記憶體使用過高**
-   - 調整緩存大小
-   - 檢查上下文洩漏
-   - 優化學習數據存儲
+2. **工具生態**
+   - 支援更多開發工具
+   - 外掛系統
+   - 自訂工具開發框架
 
-### 監控指標
+3. **效能優化**
+   - 實現智慧快取
+   - 分散式處理
+   - 邊緣計算支援
 
-- 查詢處理時間
-- 回應信心度分布
-- 工具使用統計
-- 用戶滿意度評分
-- 錯誤率和類型分布
+## 📚 相關文件
 
----
-
-*Assistant 核心模組是整個智能開發伴侶的大腦，通過語義理解、智能協作和持續學習，為開發者提供真正智能的編程助手體驗。*
+- [AI Package README](../ai/README-zh-TW.md) - AI 服務整合
+- [Tools Package README](../tools/README-zh-TW.md) - 工具系統
+- [Memory Package README](../memory/README-zh-TW.md) - 記憶系統
+- [主要架構文件](../../CLAUDE-ARCHITECTURE.md) - 系統架構指南

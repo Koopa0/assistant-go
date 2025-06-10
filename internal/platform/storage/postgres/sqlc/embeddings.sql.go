@@ -206,16 +206,16 @@ SELECT
     1 - (embedding <=> $1::vector) AS similarity
 FROM embeddings
 WHERE content_type = $2
-  AND 1 - (embedding <=> $1::vector) > $3
+  AND 1 - (embedding <=> $1::vector) > $3::float8
 ORDER BY embedding <=> $1::vector
 LIMIT $4
 `
 
 type SearchSimilarEmbeddingsParams struct {
-	Column1     pgvector.Vector `json:"column_1"`
-	ContentType string          `json:"content_type"`
-	Embedding   pgvector.Vector `json:"embedding"`
-	Limit       int32           `json:"limit"`
+	QueryEmbedding pgvector.Vector `json:"query_embedding"`
+	ContentType    string          `json:"content_type"`
+	Threshold      float64         `json:"threshold"`
+	ResultLimit    int32           `json:"result_limit"`
 }
 
 type SearchSimilarEmbeddingsRow struct {
@@ -231,10 +231,10 @@ type SearchSimilarEmbeddingsRow struct {
 
 func (q *Queries) SearchSimilarEmbeddings(ctx context.Context, arg SearchSimilarEmbeddingsParams) ([]*SearchSimilarEmbeddingsRow, error) {
 	rows, err := q.db.Query(ctx, SearchSimilarEmbeddings,
-		arg.Column1,
+		arg.QueryEmbedding,
 		arg.ContentType,
-		arg.Embedding,
-		arg.Limit,
+		arg.Threshold,
+		arg.ResultLimit,
 	)
 	if err != nil {
 		return nil, err

@@ -15,6 +15,7 @@ import (
 	"github.com/koopa0/assistant-go/internal/assistant"
 	"github.com/koopa0/assistant-go/internal/platform/observability"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres/sqlc"
+	"github.com/koopa0/assistant-go/internal/user"
 )
 
 // KnowledgeService handles knowledge graph logic
@@ -91,18 +92,15 @@ type GraphStatistics struct {
 // GetKnowledgeGraph retrieves the knowledge graph with filters
 func (s *KnowledgeService) GetKnowledgeGraph(ctx context.Context, nodeType string, depth int, includeRelated bool) (*KnowledgeGraph, error) {
 	// Get current user ID from context
-	userID := ctx.Value("user_id")
-	if userID == nil {
-		userID = "a0000000-0000-4000-8000-000000000001" // Default user ID
-		s.logger.Warn("No user ID in context, using default", slog.String("default_id", userID.(string)))
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return nil, user.ErrNoUserInContext
 	}
 
-	userUUID, err := pgtype.UUID{}, fmt.Errorf("")
-	if userIDStr, ok := userID.(string); ok {
-		if err := userUUID.Scan(userIDStr); err != nil {
-			s.logger.Error("Invalid user ID", slog.Any("error", err))
-			return nil, fmt.Errorf("invalid user ID: %w", err)
-		}
+	userUUID := pgtype.UUID{}
+	if err := userUUID.Scan(userID); err != nil {
+		s.logger.Error("Invalid user ID", slog.Any("error", err))
+		return nil, fmt.Errorf("invalid user ID: %w", err)
 	}
 
 	// If queries are not available, fall back to mock data

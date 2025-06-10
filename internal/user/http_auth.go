@@ -24,19 +24,30 @@ func NewAuthHTTPHandler(service *AuthService) *AuthHTTPHandler {
 
 // RegisterRoutes registers all authentication routes
 func (h *AuthHTTPHandler) RegisterRoutes(mux *http.ServeMux) {
+	// API v1 authentication routes
+	mux.HandleFunc("POST /api/v1/auth/login", h.HandleLogin)
+	mux.HandleFunc("POST /api/v1/auth/refresh", h.HandleRefresh)
+	mux.HandleFunc("POST /api/v1/auth/logout", h.HandleLogout)
+	mux.HandleFunc("POST /api/v1/auth/register", h.HandleRegister)
+	mux.HandleFunc("POST /api/v1/auth/forgot-password", h.HandleForgotPassword)
+	mux.HandleFunc("POST /api/v1/auth/reset-password", h.HandleResetPassword)
+	mux.HandleFunc("GET /api/v1/auth/verify-email", h.HandleVerifyEmail)
+
+	// Legacy routes for backward compatibility
 	mux.HandleFunc("POST /auth/login", h.HandleLogin)
 	mux.HandleFunc("POST /auth/refresh", h.HandleRefresh)
 	mux.HandleFunc("POST /auth/logout", h.HandleLogout)
 	mux.HandleFunc("POST /auth/register", h.HandleRegister)
-	mux.HandleFunc("POST /auth/forgot-password", h.HandleForgotPassword)
-	mux.HandleFunc("POST /auth/reset-password", h.HandleResetPassword)
-	mux.HandleFunc("GET /auth/verify-email", h.HandleVerifyEmail)
 }
 
 // HandleLogin handles user login
 func (h *AuthHTTPHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	var req AuthRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		// Log the error for debugging
+		h.service.logger.Warn("Failed to decode login request",
+			slog.Any("error", err),
+			slog.String("content_type", r.Header.Get("Content-Type")))
 		h.writeAuthError(w, "INVALID_REQUEST", "請求格式無效", http.StatusBadRequest)
 		return
 	}
@@ -50,6 +61,9 @@ func (h *AuthHTTPHandler) HandleLogin(w http.ResponseWriter, r *http.Request) {
 	// Authenticate user
 	response, err := h.service.Login(r.Context(), req.Email, req.Password)
 	if err != nil {
+		h.service.logger.Warn("Login failed",
+			slog.String("email", req.Email),
+			slog.Any("error", err))
 		h.writeAuthError(w, "UNAUTHORIZED", "電子郵件或密碼錯誤", http.StatusUnauthorized)
 		return
 	}

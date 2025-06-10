@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -14,11 +15,12 @@ import (
 	"github.com/koopa0/assistant-go/internal/config"
 	"github.com/koopa0/assistant-go/internal/langchain/vectorstore"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres/sqlc"
 )
 
 // LongTermMemory implements persistent long-term memory with semantic search using LangChain vectorstore
 type LongTermMemory struct {
-	dbClient    *postgres.SQLCClient
+	queries     sqlc.Querier
 	vectorStore vectorstores.VectorStore
 	embedder    embeddings.Embedder
 	config      config.LangChain
@@ -26,18 +28,18 @@ type LongTermMemory struct {
 }
 
 // NewLongTermMemory creates a new long-term memory instance
-func NewLongTermMemory(dbClient *postgres.SQLCClient, config config.LangChain, logger *slog.Logger) *LongTermMemory {
+func NewLongTermMemory(queries sqlc.Querier, config config.LangChain, logger *slog.Logger) *LongTermMemory {
 	return &LongTermMemory{
-		dbClient: dbClient,
-		config:   config,
-		logger:   logger,
+		queries: queries,
+		config:  config,
+		logger:  logger,
 	}
 }
 
 // NewLongTermMemoryWithVectorStore creates a new long-term memory instance with custom vectorstore and embedder
-func NewLongTermMemoryWithVectorStore(dbClient *postgres.SQLCClient, vectorStore vectorstores.VectorStore, embedder embeddings.Embedder, config config.LangChain, logger *slog.Logger) *LongTermMemory {
+func NewLongTermMemoryWithVectorStore(queries sqlc.Querier, vectorStore vectorstores.VectorStore, embedder embeddings.Embedder, config config.LangChain, logger *slog.Logger) *LongTermMemory {
 	return &LongTermMemory{
-		dbClient:    dbClient,
+		queries:     queries,
 		vectorStore: vectorStore,
 		embedder:    embedder,
 		config:      config,
@@ -120,7 +122,7 @@ func (ltm *LongTermMemory) storeWithVectorStore(ctx context.Context, entry *Memo
 // storeWithDatabase stores memory using direct database access (fallback)
 func (ltm *LongTermMemory) storeWithDatabase(ctx context.Context, entry *MemoryEntry) error {
 	// Check if database client is available
-	if ltm.dbClient == nil {
+	if ltm.queries == nil {
 		ltm.logger.Debug("No database client available for long-term memory storage",
 			slog.String("entry_id", entry.ID))
 		return nil // Gracefully handle missing database
@@ -160,14 +162,26 @@ func (ltm *LongTermMemory) storeWithDatabase(ctx context.Context, entry *MemoryE
 		metadata[fmt.Sprintf("context_%s", key)] = value
 	}
 
-	_, err := ltm.dbClient.CreateEmbedding(
-		ctx,
-		"memory",
-		entry.ID,
-		entry.Content,
-		entry.Embedding,
-		metadata,
-	)
+	// Convert entry ID to UUID
+	entryUUID, err := postgres.ParseUUID(entry.ID)
+	if err != nil {
+		return fmt.Errorf("failed to parse entry ID: %w", err)
+	}
+
+	// Convert metadata to JSON
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	// Create embedding with queries
+	_, err = ltm.queries.CreateEmbedding(ctx, sqlc.CreateEmbeddingParams{
+		ContentType: "memory",
+		ContentID:   entryUUID,
+		ContentText: entry.Content,
+		Embedding:   postgres.VectorToPgVector(entry.Embedding),
+		Metadata:    metadataJSON,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to store long-term memory: %w", err)
 	}
@@ -288,7 +302,7 @@ func (ltm *LongTermMemory) searchWithDatabase(ctx context.Context, query *Memory
 	results := make([]*MemorySearchResult, 0)
 
 	// Check if database client is available
-	if ltm.dbClient == nil {
+	if ltm.queries == nil {
 		ltm.logger.Debug("No database client available for long-term memory search")
 		return results, nil // Return empty results gracefully
 	}
@@ -325,25 +339,47 @@ func (ltm *LongTermMemory) searchWithDatabase(ctx context.Context, query *Memory
 		limit = 10 // Default limit
 	}
 
-	// Search using semantic similarity
-	searchResults, err := ltm.dbClient.SearchSimilarEmbeddings(
-		ctx,
-		queryEmbedding,
-		"memory",
-		limit,
-		similarity,
-	)
+	// Note: The current SearchSimilarEmbeddings doesn't support metadata filtering
+	// We'll filter the results after retrieval
+	if query.UserID != "" || query.SessionID != "" || query.MinImportance > 0 {
+		ltm.logger.Debug("Additional filtering will be applied after retrieval",
+			slog.String("user_id", query.UserID),
+			slog.String("session_id", query.SessionID),
+			slog.Float64("min_importance", query.MinImportance))
+	}
+
+	// Search for similar embeddings
+	searchResults, err := ltm.queries.SearchSimilarEmbeddings(ctx, sqlc.SearchSimilarEmbeddingsParams{
+		QueryEmbedding: postgres.VectorToPgVector(queryEmbedding),
+		ContentType:    "memory",
+		Threshold:      similarity,
+		ResultLimit:    int32(limit),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to search long-term memory: %w", err)
 	}
 
-	// Convert results and apply additional filters
-	for _, result := range searchResults {
-		// Parse metadata to reconstruct memory entry
-		entry, err := ltm.parseEmbeddingToMemoryEntry(result.Record)
+	// Convert results
+	for _, searchResult := range searchResults {
+		// Convert to standard Embedding type
+		emb := &sqlc.Embedding{
+			ID:          searchResult.ID,
+			ContentType: searchResult.ContentType,
+			ContentID:   searchResult.ContentID,
+			ContentText: searchResult.ContentText,
+			Embedding:   searchResult.Embedding,
+			Metadata:    searchResult.Metadata,
+			CreatedAt:   searchResult.CreatedAt,
+		}
+
+		// Convert to domain embedding record
+		embRecord := postgres.ConvertSQLCEmbedding(emb)
+
+		// Parse to memory entry
+		entry, err := ltm.parseEmbeddingToMemoryEntry(embRecord)
 		if err != nil {
 			ltm.logger.Warn("Failed to parse embedding result",
-				slog.String("embedding_id", result.Record.ID),
+				slog.String("embedding_id", searchResult.ID.String()),
 				slog.Any("error", err))
 			continue
 		}
@@ -353,12 +389,15 @@ func (ltm *LongTermMemory) searchWithDatabase(ctx context.Context, query *Memory
 			continue
 		}
 
+		// Convert similarity from int32 to float64
+		similarityFloat := float64(searchResult.Similarity) / 100.0
+
 		// Calculate relevance
-		relevance := ltm.calculateRelevance(entry, query, result.Similarity)
+		relevance := ltm.calculateRelevance(entry, query, similarityFloat)
 
 		memoryResult := &MemorySearchResult{
 			Entry:      entry,
-			Similarity: result.Similarity,
+			Similarity: similarityFloat,
 			Relevance:  relevance,
 		}
 
@@ -420,15 +459,26 @@ func (ltm *LongTermMemory) Update(ctx context.Context, entry *MemoryEntry) error
 		}
 	}
 
+	// Convert entry ID to UUID
+	entryUUID, err := postgres.ParseUUID(entry.ID)
+	if err != nil {
+		return fmt.Errorf("failed to parse entry ID: %w", err)
+	}
+
+	// Convert metadata to JSON
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
 	// Update in database
-	_, err := ltm.dbClient.CreateEmbedding(
-		ctx,
-		"memory",
-		entry.ID,
-		entry.Content,
-		entry.Embedding,
-		metadata,
-	)
+	_, err = ltm.queries.CreateEmbedding(ctx, sqlc.CreateEmbeddingParams{
+		ContentType: "memory",
+		ContentID:   entryUUID,
+		ContentText: entry.Content,
+		Embedding:   postgres.VectorToPgVector(entry.Embedding),
+		Metadata:    metadataJSON,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to update long-term memory: %w", err)
 	}
@@ -441,8 +491,27 @@ func (ltm *LongTermMemory) Update(ctx context.Context, entry *MemoryEntry) error
 
 // Delete deletes a memory entry
 func (ltm *LongTermMemory) Delete(ctx context.Context, entryID string) error {
-	// TODO: Implement deletion from embedding store
-	// For now, just log the operation
+	// Check if database client is available
+	if ltm.queries == nil {
+		ltm.logger.Debug("No database client available for deletion")
+		return nil
+	}
+
+	// Convert entry ID to UUID
+	entryUUID, err := postgres.ParseUUID(entryID)
+	if err != nil {
+		return fmt.Errorf("failed to parse entry ID: %w", err)
+	}
+
+	// Delete by content type and content ID
+	err = ltm.queries.DeleteEmbedding(ctx, sqlc.DeleteEmbeddingParams{
+		ContentType: "memory",
+		ContentID:   entryUUID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete long-term memory entry: %w", err)
+	}
+
 	ltm.logger.Debug("Deleted long-term memory entry",
 		slog.String("id", entryID))
 
@@ -451,32 +520,75 @@ func (ltm *LongTermMemory) Delete(ctx context.Context, entryID string) error {
 
 // Clear clears memories for a user
 func (ltm *LongTermMemory) Clear(ctx context.Context, userID string, olderThan *time.Time) error {
-	// This would require a custom query to delete embeddings by metadata
-	// For now, we'll log the operation
+	// Check if database client is available
+	if ltm.queries == nil {
+		ltm.logger.Debug("No database client available for clearing memories")
+		return nil
+	}
+
 	ltm.logger.Info("Long-term memory clear requested",
 		slog.String("user_id", userID),
 		slog.Any("older_than", olderThan))
 
-	// TODO: Implement bulk deletion by user ID and timestamp
-	// This would require extending the embedding client with metadata-based deletion
+	// If olderThan is specified, delete expired embeddings
+	if olderThan != nil {
+		err := ltm.queries.DeleteExpiredEmbeddings(ctx, sqlc.DeleteExpiredEmbeddingsParams{
+			CreatedAt: *olderThan,
+			Column2:   "memory", // content_type parameter
+		})
+		if err != nil {
+			return fmt.Errorf("failed to delete expired memories: %w", err)
+		}
+	} else {
+		// Delete all memories for the content type
+		// Note: This deletes ALL memory type embeddings, not user-specific
+		// For user-specific deletion, we would need to use metadata filtering
+		metadataFilter := map[string]interface{}{
+			"user_id": userID,
+		}
+		metadataJSON, err := json.Marshal(metadataFilter)
+		if err != nil {
+			return fmt.Errorf("failed to create metadata filter: %w", err)
+		}
+
+		err = ltm.queries.DeleteEmbeddingsByMetadata(ctx, metadataJSON)
+		if err != nil {
+			return fmt.Errorf("failed to delete user memories: %w", err)
+		}
+	}
 
 	return nil
 }
 
 // GetStats returns statistics for long-term memory
 func (ltm *LongTermMemory) GetStats(ctx context.Context, userID string) (*MemoryTypeStats, error) {
-	// This would require aggregation queries on the embedding store
-	// For now, return basic stats
-	stats := &MemoryTypeStats{
-		EntryCount:        0,
-		TotalSize:         0,
-		AverageImportance: 0,
+	// Check if database client is available
+	if ltm.queries == nil {
+		return &MemoryTypeStats{
+			EntryCount:        0,
+			TotalSize:         0,
+			AverageImportance: 0,
+		}, nil
 	}
 
 	ltm.logger.Debug("Long-term memory stats requested",
 		slog.String("user_id", userID))
 
-	// TODO: Implement proper stats collection from embedding store
+	// Get count of memory embeddings
+	count, err := ltm.queries.CountEmbeddingsByType(ctx, "memory")
+	if err != nil {
+		ltm.logger.Warn("Failed to get memory count",
+			slog.Any("error", err))
+		count = 0
+	}
+
+	// Basic stats - we can't easily filter by user without metadata search
+	stats := &MemoryTypeStats{
+		EntryCount:        int(count),
+		TotalSize:         int64(count) * 1536 * 4, // Approximate size (1536 dimensions * 4 bytes per float)
+		AverageImportance: 0.5,                     // Default importance
+	}
+
 	return stats, nil
 }
 
@@ -484,8 +596,24 @@ func (ltm *LongTermMemory) GetStats(ctx context.Context, userID string) (*Memory
 func (ltm *LongTermMemory) Cleanup(ctx context.Context) error {
 	ltm.logger.Info("Long-term memory cleanup started")
 
-	// TODO: Implement cleanup based on expiration dates in metadata
-	// This would require querying embeddings by metadata and deleting expired ones
+	// Check if database client is available
+	if ltm.queries == nil {
+		ltm.logger.Debug("No database client available for cleanup")
+		return nil
+	}
+
+	// Delete embeddings older than 90 days
+	expirationDate := time.Now().AddDate(0, -3, 0) // 3 months ago
+	err := ltm.queries.DeleteExpiredEmbeddings(ctx, sqlc.DeleteExpiredEmbeddingsParams{
+		CreatedAt: expirationDate,
+		Column2:   "memory", // content_type parameter
+	})
+	if err != nil {
+		return fmt.Errorf("failed to cleanup expired memories: %w", err)
+	}
+
+	ltm.logger.Info("Long-term memory cleanup completed",
+		slog.Time("older_than", expirationDate))
 
 	return nil
 }

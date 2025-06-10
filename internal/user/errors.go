@@ -373,13 +373,3 @@ func RequiresReauthentication(err error) bool {
 	}
 	return false
 }
-
-// GetUserID extracts user ID from auth errors
-func GetUserID(err error) string {
-	if assistantErr := errors.GetAssistantError(err); assistantErr != nil {
-		if userID, ok := assistantErr.Context["user_id"].(string); ok {
-			return userID
-		}
-	}
-	return ""
-}

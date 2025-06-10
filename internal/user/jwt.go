@@ -13,6 +13,14 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// JWTService defines the interface for JWT operations
+type JWTService interface {
+	GenerateAccessToken(userID, email, role string) (string, error)
+	GenerateRefreshToken(userID string) (string, error)
+	ValidateToken(tokenString string) (string, error) // Returns userID
+	ValidateTokenClaims(tokenString string) (*TokenClaims, error)
+}
+
 // TokenClaims represents the claims in a JWT token
 type TokenClaims struct {
 	UserID string `json:"user_id"`
@@ -68,8 +76,17 @@ func (s *TokenService) GenerateRefreshToken(userID string) (string, error) {
 	return token.SignedString(s.secretKey)
 }
 
-// ValidateToken validates a JWT token and returns the claims
-func (s *TokenService) ValidateToken(tokenString string) (*TokenClaims, error) {
+// ValidateToken validates a JWT token and returns the user ID
+func (s *TokenService) ValidateToken(tokenString string) (string, error) {
+	claims, err := s.ValidateTokenClaims(tokenString)
+	if err != nil {
+		return "", err
+	}
+	return claims.UserID, nil
+}
+
+// ValidateTokenClaims validates a JWT token and returns the claims
+func (s *TokenService) ValidateTokenClaims(tokenString string) (*TokenClaims, error) {
 	// Remove Bearer prefix if present
 	tokenString = strings.TrimPrefix(tokenString, "Bearer ")
 

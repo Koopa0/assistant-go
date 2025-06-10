@@ -64,7 +64,7 @@ func TestNewService(t *testing.T) {
 
 	// Create mock LLM client
 	mockLLM := NewMockLLM()
-	client := &LangChainClient{
+	client := &Client{
 		llm: mockLLM,
 	}
 

@@ -19,12 +19,12 @@ import (
 // Service handles all conversation-related operations
 // Merges the functionality of Repository and Manager into a single service
 type Service struct {
-	queries *sqlc.Queries
+	queries sqlc.Querier
 	logger  *slog.Logger
 }
 
 // NewService creates a new conversation service
-func NewService(queries *sqlc.Queries, logger *slog.Logger) *Service {
+func NewService(queries sqlc.Querier, logger *slog.Logger) *Service {
 	return &Service{
 		queries: queries,
 		logger:  logger,
@@ -32,7 +32,7 @@ func NewService(queries *sqlc.Queries, logger *slog.Logger) *Service {
 }
 
 // NewConversationSystem creates a new conversation service (backward compatibility)
-func NewConversationSystem(queries *sqlc.Queries, logger *slog.Logger) *Service {
+func NewConversationSystem(queries sqlc.Querier, logger *slog.Logger) *Service {
 	return NewService(queries, logger)
 }
 

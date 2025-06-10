@@ -4,15 +4,17 @@ log_level: debug
 log_format: text
 
 database:
-  url: "postgres://koopa@localhost:5432/goassistant?sslmode=disable"
-  # PostgreSQL 17 optimized settings for development
-  max_connections: 15          # Reduced for dev environment but still optimized
-  min_connections: 3           # Keep some connections warm
-  max_idle_time: "10m"         # Close idle connections
-  max_lifetime: "30m"          # Shorter rotation for dev
+  # 開發環境資料庫配置
+  # 注意：生產環境必須使用環境變數 DATABASE_URL
+  url: "${DATABASE_URL}" # 優先使用環境變數，避免硬編碼
+  # PostgreSQL 17 優化設定（開發環境）
+  max_connections: 15 # 開發環境減少連接數
+  min_connections: 3 # 保持最小連接池
+  max_idle_time: "10m" # 關閉閒置連接
+  max_lifetime: "30m" # 開發環境較短的連接生命週期
   connect_timeout: "5s"
-  migrations_path: "internal/storage/postgres/migrations"
-  enable_logging: true         # Keep logging enabled for dev
+  migrations_path: "internal/platform/storage/postgres/migrations"
+  enable_logging: true # 開發環境啟用日誌
 
 server:
   address: ":8080"
@@ -37,13 +39,13 @@ cli:
 ai:
   default_provider: "claude"
   claude:
-    api_key: "${CLAUDE_API_KEY}"  # Will be overridden by environment variable
+    api_key: "${CLAUDE_API_KEY}" # Will be overridden by environment variable
     model: "claude-3-sonnet-20240229"
     max_tokens: 4096
     temperature: 0.7
     base_url: "https://api.anthropic.com"
   gemini:
-    api_key: "${GEMINI_API_KEY}"  # Will be overridden by environment variable
+    api_key: "${GEMINI_API_KEY}" # Will be overridden by environment variable
     model: "gemini-pro"
     max_tokens: 4096
     temperature: 0.7
@@ -60,26 +62,26 @@ tools:
     max_results: 10
     enable_cache: true
     cache_ttl: "1h"
-  
+
   postgres:
     query_timeout: "30s"
     max_query_size: 1048576
     enable_explain: true
-  
+
   kubernetes:
     namespace: "default"
     timeout: "30s"
     enable_metrics: true
-  
+
   docker:
     host: "unix:///var/run/docker.sock"
     api_version: "1.41"
     timeout: "30s"
     tls_verify: false
-  
+
   cloudflare:
     # API credentials should be set via environment variables
-  
+
   langchain:
     enable_memory: true
     memory_size: 10
@@ -87,12 +89,16 @@ tools:
     timeout: "60s"
 
 security:
+  # JWT 配置 - 必須設定環境變數 SECURITY_JWT_SECRET
+  jwt_secret: "${SECURITY_JWT_SECRET}" # 必須從環境變數載入
   jwt_expiration: "24h"
   rate_limit_rps: 100
   rate_limit_burst: 200
   enable_cors: true
+  # 開發環境允許的 CORS 來源
   allowed_origins:
     - "http://localhost:3000"
     - "http://localhost:8080"
     - "http://127.0.0.1:3000"
     - "http://127.0.0.1:8080"
+

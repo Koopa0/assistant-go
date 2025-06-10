@@ -11,6 +11,7 @@ import (
 	"github.com/koopa0/assistant-go/internal/memory"
 	"github.com/koopa0/assistant-go/internal/platform/server/handlers"
 	"github.com/koopa0/assistant-go/internal/platform/server/middleware"
+	"github.com/koopa0/assistant-go/internal/user"
 )
 
 // Handler handles HTTP requests for memory system
@@ -46,11 +47,11 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 func (h *Handler) handleGetMemoryNodes(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Get user_id from request (should be from JWT token or session in production)
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		// Temporarily use default Koopa user
-		userID = "a0000000-0000-4000-8000-000000000001"
+	// Get user_id from context
+	userID, err := user.RequireUserID(ctx)
+	if err != nil {
+		h.WriteUnauthorized(w, "Authentication required")
+		return
 	}
 
 	// Parse query parameters
@@ -75,11 +76,11 @@ func (h *Handler) handleGetMemoryNodes(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleGetMemoryGraph(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Get user_id from request
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		// Temporarily use default Koopa user
-		userID = "a0000000-0000-4000-8000-000000000001"
+	// Get user_id from context
+	userID, err := user.RequireUserID(ctx)
+	if err != nil {
+		h.WriteUnauthorized(w, "Authentication required")
+		return
 	}
 
 	// Get memory graph
@@ -105,11 +106,11 @@ func (h *Handler) handleUpdateMemoryNode(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Get user_id from request
-	userID := r.URL.Query().Get("user_id")
-	if userID == "" {
-		// Temporarily use default Koopa user
-		userID = "a0000000-0000-4000-8000-000000000001"
+	// Get user_id from context
+	userID, err := user.RequireUserID(ctx)
+	if err != nil {
+		h.WriteUnauthorized(w, "Authentication required")
+		return
 	}
 
 	// Parse request body

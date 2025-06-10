@@ -2,9 +2,10 @@
 -- 建立完整的測試資料集，包含管理員 Koopa 和相關資料
 
 -- 1. 建立管理員使用者 Koopa
--- 密碼: koopa123 (使用 bcrypt hash)
+-- 密碼: KoopaAssistant2024! (使用 bcrypt hash cost 12)
+-- 注意：此為開發環境 seed data，生產環境請勿使用
 INSERT INTO users (id, username, email, password_hash, full_name, avatar_url, preferences, is_active) VALUES 
-('a0000000-0000-0000-0000-000000000001'::uuid, 'koopa', 'koopa@assistant.dev', '$2a$10$YourHashHere123456789012345678901234567890', 'Koopa', 'https://avatars.githubusercontent.com/koopa', 
+('a0000000-0000-0000-0000-000000000001'::uuid, 'koopa', 'koopa@assistant.local', '$2a$10$Ib62kjkKz3qD6GAcycBF5evEpr1p5Vm7ZVXDcvvwpqISQtIFnWzM.', 'Koopa', 'https://avatars.githubusercontent.com/koopa', 
 '{
   "language": "zh-TW",
   "theme": "dark",

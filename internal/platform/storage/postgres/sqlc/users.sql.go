@@ -161,7 +161,7 @@ func (q *Queries) DeactivateUser(ctx context.Context, id pgtype.UUID) (*Deactiva
 }
 
 const GetActiveUsers = `-- name: GetActiveUsers :many
-SELECT id, username, email, full_name, avatar_url, created_at, updated_at
+SELECT id, username, email, full_name, avatar_url, preferences, is_active, created_at, updated_at
 FROM users 
 WHERE is_active = true
 ORDER BY created_at DESC
@@ -174,13 +174,15 @@ type GetActiveUsersParams struct {
 }
 
 type GetActiveUsersRow struct {
-	ID        pgtype.UUID `json:"id"`
-	Username  string      `json:"username"`
-	Email     string      `json:"email"`
-	FullName  pgtype.Text `json:"full_name"`
-	AvatarUrl pgtype.Text `json:"avatar_url"`
-	CreatedAt time.Time   `json:"created_at"`
-	UpdatedAt time.Time   `json:"updated_at"`
+	ID          pgtype.UUID `json:"id"`
+	Username    string      `json:"username"`
+	Email       string      `json:"email"`
+	FullName    pgtype.Text `json:"full_name"`
+	AvatarUrl   pgtype.Text `json:"avatar_url"`
+	Preferences []byte      `json:"preferences"`
+	IsActive    pgtype.Bool `json:"is_active"`
+	CreatedAt   time.Time   `json:"created_at"`
+	UpdatedAt   time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) GetActiveUsers(ctx context.Context, arg GetActiveUsersParams) ([]*GetActiveUsersRow, error) {
@@ -198,6 +200,8 @@ func (q *Queries) GetActiveUsers(ctx context.Context, arg GetActiveUsersParams) 
 			&i.Email,
 			&i.FullName,
 			&i.AvatarUrl,
+			&i.Preferences,
+			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -513,7 +517,7 @@ func (q *Queries) RemoveFavoriteTool(ctx context.Context, arg RemoveFavoriteTool
 }
 
 const SearchUsers = `-- name: SearchUsers :many
-SELECT id, username, email, full_name, avatar_url, created_at, updated_at
+SELECT id, username, email, full_name, avatar_url, preferences, is_active, created_at, updated_at
 FROM users 
 WHERE is_active = true 
   AND (
@@ -532,13 +536,15 @@ type SearchUsersParams struct {
 }
 
 type SearchUsersRow struct {
-	ID        pgtype.UUID `json:"id"`
-	Username  string      `json:"username"`
-	Email     string      `json:"email"`
-	FullName  pgtype.Text `json:"full_name"`
-	AvatarUrl pgtype.Text `json:"avatar_url"`
-	CreatedAt time.Time   `json:"created_at"`
-	UpdatedAt time.Time   `json:"updated_at"`
+	ID          pgtype.UUID `json:"id"`
+	Username    string      `json:"username"`
+	Email       string      `json:"email"`
+	FullName    pgtype.Text `json:"full_name"`
+	AvatarUrl   pgtype.Text `json:"avatar_url"`
+	Preferences []byte      `json:"preferences"`
+	IsActive    pgtype.Bool `json:"is_active"`
+	CreatedAt   time.Time   `json:"created_at"`
+	UpdatedAt   time.Time   `json:"updated_at"`
 }
 
 func (q *Queries) SearchUsers(ctx context.Context, arg SearchUsersParams) ([]*SearchUsersRow, error) {
@@ -556,6 +562,8 @@ func (q *Queries) SearchUsers(ctx context.Context, arg SearchUsersParams) ([]*Se
 			&i.Email,
 			&i.FullName,
 			&i.AvatarUrl,
+			&i.Preferences,
+			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {

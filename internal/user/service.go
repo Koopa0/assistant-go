@@ -17,16 +17,16 @@ import (
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres/sqlc"
 )
 
-// UserService handles user-related business logic
-type UserService struct {
+// Service handles user-related business logic
+type Service struct {
 	queries *sqlc.Queries
 	logger  *slog.Logger
 	metrics *observability.Metrics
 }
 
 // NewUserService creates a new user service
-func NewUserService(queries *sqlc.Queries, logger *slog.Logger, metrics *observability.Metrics) *UserService {
-	return &UserService{
+func NewUserService(queries *sqlc.Queries, logger *slog.Logger, metrics *observability.Metrics) *Service {
+	return &Service{
 		queries: queries,
 		logger:  observability.ServerLogger(logger, "users"),
 		metrics: metrics,
@@ -122,7 +122,7 @@ type APIKeyResponse struct {
 }
 
 // CreateUser creates a new user account
-func (s *UserService) CreateUser(ctx context.Context, req *CreateUserRequest) (*UserProfile, error) {
+func (s *Service) CreateUser(ctx context.Context, req *CreateUserRequest) (*UserProfile, error) {
 	// Hash password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -184,7 +184,7 @@ func (s *UserService) CreateUser(ctx context.Context, req *CreateUserRequest) (*
 }
 
 // GetUserByID retrieves a user by their ID
-func (s *UserService) GetUserByID(ctx context.Context, userID string) (*UserProfile, error) {
+func (s *Service) GetUserByID(ctx context.Context, userID string) (*UserProfile, error) {
 	id, err := uuid.Parse(userID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid user ID: %w", err)
@@ -202,7 +202,7 @@ func (s *UserService) GetUserByID(ctx context.Context, userID string) (*UserProf
 }
 
 // GetUserByEmail retrieves a user by their email
-func (s *UserService) GetUserByEmail(ctx context.Context, email string) (*UserProfile, error) {
+func (s *Service) GetUserByEmail(ctx context.Context, email string) (*UserProfile, error) {
 	user, err := s.queries.GetUserByEmail(ctx, email)
 	if err != nil {
 		s.logger.Error("Failed to get user by email",
@@ -215,7 +215,7 @@ func (s *UserService) GetUserByEmail(ctx context.Context, email string) (*UserPr
 }
 
 // UpdateProfile updates a user's profile information
-func (s *UserService) UpdateProfile(ctx context.Context, userID string, req *UpdateProfileRequest) (*UserProfile, error) {
+func (s *Service) UpdateProfile(ctx context.Context, userID string, req *UpdateProfileRequest) (*UserProfile, error) {
 	id, err := uuid.Parse(userID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid user ID: %w", err)
@@ -251,7 +251,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID string, req *Upd
 }
 
 // UpdatePreferences updates a user's preferences
-func (s *UserService) UpdatePreferences(ctx context.Context, userID string, req *UpdatePreferencesRequest) (*UserProfile, error) {
+func (s *Service) UpdatePreferences(ctx context.Context, userID string, req *UpdatePreferencesRequest) (*UserProfile, error) {
 	id, err := uuid.Parse(userID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid user ID: %w", err)
@@ -282,7 +282,7 @@ func (s *UserService) UpdatePreferences(ctx context.Context, userID string, req 
 }
 
 // GetUserStatistics retrieves comprehensive user statistics
-func (s *UserService) GetUserStatistics(ctx context.Context, userID string) (*UserStatistics, error) {
+func (s *Service) GetUserStatistics(ctx context.Context, userID string) (*UserStatistics, error) {
 	id, err := uuid.Parse(userID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid user ID: %w", err)
@@ -318,7 +318,7 @@ func (s *UserService) GetUserStatistics(ctx context.Context, userID string) (*Us
 }
 
 // GetUserActivitySummary retrieves user activity summary
-func (s *UserService) GetUserActivitySummary(ctx context.Context, userID string) (*UserActivitySummary, error) {
+func (s *Service) GetUserActivitySummary(ctx context.Context, userID string) (*UserActivitySummary, error) {
 	id, err := uuid.Parse(userID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid user ID: %w", err)
@@ -348,7 +348,7 @@ func (s *UserService) GetUserActivitySummary(ctx context.Context, userID string)
 }
 
 // GetUserSettings retrieves user settings and preferences
-func (s *UserService) GetUserSettings(ctx context.Context, userID string) (*UserSettings, error) {
+func (s *Service) GetUserSettings(ctx context.Context, userID string) (*UserSettings, error) {
 	id, err := uuid.Parse(userID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid user ID: %w", err)
@@ -390,7 +390,7 @@ func (s *UserService) GetUserSettings(ctx context.Context, userID string) (*User
 }
 
 // ChangePassword changes a user's password
-func (s *UserService) ChangePassword(ctx context.Context, userID string, req *ChangePasswordRequest) error {
+func (s *Service) ChangePassword(ctx context.Context, userID string, req *ChangePasswordRequest) error {
 	id, err := uuid.Parse(userID)
 	if err != nil {
 		return fmt.Errorf("invalid user ID: %w", err)
@@ -441,7 +441,7 @@ func (s *UserService) ChangePassword(ctx context.Context, userID string, req *Ch
 }
 
 // AddFavoriteTool adds a tool to user's favorites
-func (s *UserService) AddFavoriteTool(ctx context.Context, userID, toolID string) error {
+func (s *Service) AddFavoriteTool(ctx context.Context, userID, toolID string) error {
 	id, err := uuid.Parse(userID)
 	if err != nil {
 		return fmt.Errorf("invalid user ID: %w", err)
@@ -467,7 +467,7 @@ func (s *UserService) AddFavoriteTool(ctx context.Context, userID, toolID string
 }
 
 // RemoveFavoriteTool removes a tool from user's favorites
-func (s *UserService) RemoveFavoriteTool(ctx context.Context, userID, toolID string) error {
+func (s *Service) RemoveFavoriteTool(ctx context.Context, userID, toolID string) error {
 	id, err := uuid.Parse(userID)
 	if err != nil {
 		return fmt.Errorf("invalid user ID: %w", err)
@@ -493,7 +493,7 @@ func (s *UserService) RemoveFavoriteTool(ctx context.Context, userID, toolID str
 }
 
 // DeactivateUser deactivates a user account
-func (s *UserService) DeactivateUser(ctx context.Context, userID string) error {
+func (s *Service) DeactivateUser(ctx context.Context, userID string) error {
 	id, err := uuid.Parse(userID)
 	if err != nil {
 		return fmt.Errorf("invalid user ID: %w", err)
@@ -514,7 +514,7 @@ func (s *UserService) DeactivateUser(ctx context.Context, userID string) error {
 }
 
 // generateAPIKey generates a random API key
-func (s *UserService) generateAPIKey() (string, error) {
+func (s *Service) generateAPIKey() (string, error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", err
@@ -523,7 +523,7 @@ func (s *UserService) generateAPIKey() (string, error) {
 }
 
 // userToProfile converts a database user to a UserProfile
-func (s *UserService) userToProfile(user sqlc.User) *UserProfile {
+func (s *Service) userToProfile(user sqlc.User) *UserProfile {
 	// Parse preferences from JSONB bytes
 	var preferences map[string]interface{}
 	if user.Preferences != nil {
@@ -559,7 +559,7 @@ func (s *UserService) userToProfile(user sqlc.User) *UserProfile {
 }
 
 // createUserRowToProfile converts a CreateUserRow to a UserProfile
-func (s *UserService) createUserRowToProfile(user sqlc.CreateUserRow) *UserProfile {
+func (s *Service) createUserRowToProfile(user sqlc.CreateUserRow) *UserProfile {
 	// Parse preferences from JSONB bytes
 	var preferences map[string]interface{}
 	if user.Preferences != nil {
@@ -595,7 +595,7 @@ func (s *UserService) createUserRowToProfile(user sqlc.CreateUserRow) *UserProfi
 }
 
 // getUserByIDRowToProfile converts a GetUserByIDRow to a UserProfile
-func (s *UserService) getUserByIDRowToProfile(user sqlc.GetUserByIDRow) *UserProfile {
+func (s *Service) getUserByIDRowToProfile(user sqlc.GetUserByIDRow) *UserProfile {
 	// Parse preferences from JSONB bytes
 	var preferences map[string]interface{}
 	if user.Preferences != nil {
@@ -631,7 +631,7 @@ func (s *UserService) getUserByIDRowToProfile(user sqlc.GetUserByIDRow) *UserPro
 }
 
 // updateUserProfileRowToProfile converts an UpdateUserProfileRow to a UserProfile
-func (s *UserService) updateUserProfileRowToProfile(user sqlc.UpdateUserProfileRow) *UserProfile {
+func (s *Service) updateUserProfileRowToProfile(user sqlc.UpdateUserProfileRow) *UserProfile {
 	// Parse preferences from JSONB bytes
 	var preferences map[string]interface{}
 	if user.Preferences != nil {
@@ -667,7 +667,7 @@ func (s *UserService) updateUserProfileRowToProfile(user sqlc.UpdateUserProfileR
 }
 
 // updateUserPreferencesRowToProfile converts an UpdateUserPreferencesRow to a UserProfile
-func (s *UserService) updateUserPreferencesRowToProfile(user sqlc.UpdateUserPreferencesRow) *UserProfile {
+func (s *Service) updateUserPreferencesRowToProfile(user sqlc.UpdateUserPreferencesRow) *UserProfile {
 	// Parse preferences from JSONB bytes
 	var preferences map[string]interface{}
 	if user.Preferences != nil {

@@ -242,7 +242,8 @@ func (q *Queries) EvolvePattern(ctx context.Context, arg EvolvePatternParams) (*
 }
 
 const GetActiveSessions = `-- name: GetActiveSessions :many
-SELECT id, user_id, session_type, project_context, goals, actual_outcomes, interruption_count, focus_score, productivity_metrics, mood_indicators, started_at, ended_at, total_duration_minutes FROM development_sessions
+SELECT id, user_id, session_type, project_context, goals, actual_outcomes, interruption_count, focus_score, productivity_metrics, mood_indicators, started_at, ended_at, total_duration_minutes
+FROM development_sessions
 WHERE user_id = $1::uuid
   AND ended_at IS NULL
 ORDER BY started_at DESC
@@ -283,7 +284,8 @@ func (q *Queries) GetActiveSessions(ctx context.Context, dollar_1 pgtype.UUID) (
 }
 
 const GetCodePattern = `-- name: GetCodePattern :one
-SELECT id, user_id, pattern_category, pattern_name, pattern_ast, usage_contexts, frequency, last_used, evolution_history, quality_score, created_at, updated_at FROM code_patterns
+SELECT id, user_id, pattern_category, pattern_name, pattern_ast, usage_contexts, frequency, last_used, evolution_history, quality_score, created_at, updated_at
+FROM code_patterns
 WHERE id = $1
 `
 
@@ -308,7 +310,8 @@ func (q *Queries) GetCodePattern(ctx context.Context, id pgtype.UUID) (*CodePatt
 }
 
 const GetCodePatterns = `-- name: GetCodePatterns :many
-SELECT id, user_id, pattern_category, pattern_name, pattern_ast, usage_contexts, frequency, last_used, evolution_history, quality_score, created_at, updated_at FROM code_patterns
+SELECT id, user_id, pattern_category, pattern_name, pattern_ast, usage_contexts, frequency, last_used, evolution_history, quality_score, created_at, updated_at
+FROM code_patterns
 WHERE user_id = $1::uuid
   AND (pattern_category = $2 OR $2 IS NULL)
 ORDER BY frequency DESC, last_used DESC
@@ -361,7 +364,8 @@ func (q *Queries) GetCodePatterns(ctx context.Context, arg GetCodePatternsParams
 }
 
 const GetDevelopmentSession = `-- name: GetDevelopmentSession :one
-SELECT id, user_id, session_type, project_context, goals, actual_outcomes, interruption_count, focus_score, productivity_metrics, mood_indicators, started_at, ended_at, total_duration_minutes FROM development_sessions
+SELECT id, user_id, session_type, project_context, goals, actual_outcomes, interruption_count, focus_score, productivity_metrics, mood_indicators, started_at, ended_at, total_duration_minutes
+FROM development_sessions
 WHERE id = $1
 `
 
@@ -387,7 +391,8 @@ func (q *Queries) GetDevelopmentSession(ctx context.Context, id pgtype.UUID) (*D
 }
 
 const GetDevelopmentSessions = `-- name: GetDevelopmentSessions :many
-SELECT id, user_id, session_type, project_context, goals, actual_outcomes, interruption_count, focus_score, productivity_metrics, mood_indicators, started_at, ended_at, total_duration_minutes FROM development_sessions
+SELECT id, user_id, session_type, project_context, goals, actual_outcomes, interruption_count, focus_score, productivity_metrics, mood_indicators, started_at, ended_at, total_duration_minutes
+FROM development_sessions
 WHERE user_id = $1::uuid
   AND (session_type = $2 OR $2 IS NULL)
   AND started_at >= COALESCE($3, NOW() - INTERVAL '30 days')
@@ -689,7 +694,8 @@ func (q *Queries) GetSessionStatistics(ctx context.Context, arg GetSessionStatis
 }
 
 const SearchCodePatterns = `-- name: SearchCodePatterns :many
-SELECT id, user_id, pattern_category, pattern_name, pattern_ast, usage_contexts, frequency, last_used, evolution_history, quality_score, created_at, updated_at FROM code_patterns
+SELECT id, user_id, pattern_category, pattern_name, pattern_ast, usage_contexts, frequency, last_used, evolution_history, quality_score, created_at, updated_at
+FROM code_patterns
 WHERE user_id = $1::uuid
   AND (pattern_name ILIKE '%' || $2 || '%' OR $2 = ANY(usage_contexts))
 ORDER BY frequency DESC, last_used DESC

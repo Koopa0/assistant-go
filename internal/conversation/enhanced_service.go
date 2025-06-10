@@ -17,14 +17,14 @@ import (
 
 // EnhancedConversationService 提供增強的對話管理功能
 type EnhancedConversationService struct {
-	queries      *sqlc.Queries
+	queries      sqlc.Querier
 	logger       *slog.Logger
 	metrics      *observability.Metrics
 	tokenCounter token.Counter
 }
 
 // NewEnhancedConversationService 建立新的增強對話服務
-func NewEnhancedConversationService(queries *sqlc.Queries, logger *slog.Logger, metrics *observability.Metrics) *EnhancedConversationService {
+func NewEnhancedConversationService(queries sqlc.Querier, logger *slog.Logger, metrics *observability.Metrics) *EnhancedConversationService {
 	return &EnhancedConversationService{
 		queries:      queries,
 		logger:       logger,

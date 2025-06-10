@@ -118,7 +118,8 @@ func (q *Queries) GetMostUsedTools(ctx context.Context, arg GetMostUsedToolsPara
 }
 
 const GetRecentToolExecutions = `-- name: GetRecentToolExecutions :many
-SELECT te.id, te.message_id, te.tool_name, te.input_data, te.output_data, te.status, te.error_message, te.execution_time_ms, te.started_at, te.completed_at FROM tool_executions te
+SELECT te.id, te.message_id, te.tool_name, te.input_data, te.output_data, te.status, te.error_message, te.execution_time_ms, te.started_at, te.completed_at
+FROM tool_executions te
 JOIN messages m ON te.message_id = m.id
 JOIN conversations c ON m.conversation_id = c.id
 WHERE c.user_id = $1
@@ -163,7 +164,8 @@ func (q *Queries) GetRecentToolExecutions(ctx context.Context, arg GetRecentTool
 }
 
 const GetToolExecution = `-- name: GetToolExecution :one
-SELECT id, message_id, tool_name, input_data, output_data, status, error_message, execution_time_ms, started_at, completed_at FROM tool_executions
+SELECT id, message_id, tool_name, input_data, output_data, status, error_message, execution_time_ms, started_at, completed_at
+FROM tool_executions
 WHERE id = $1
 `
 
@@ -263,7 +265,8 @@ func (q *Queries) GetToolExecutionTrends(ctx context.Context, arg GetToolExecuti
 }
 
 const GetToolExecutionsByMessage = `-- name: GetToolExecutionsByMessage :many
-SELECT id, message_id, tool_name, input_data, output_data, status, error_message, execution_time_ms, started_at, completed_at FROM tool_executions
+SELECT id, message_id, tool_name, input_data, output_data, status, error_message, execution_time_ms, started_at, completed_at
+FROM tool_executions
 WHERE message_id = $1
 ORDER BY started_at ASC
 `
@@ -300,7 +303,8 @@ func (q *Queries) GetToolExecutionsByMessage(ctx context.Context, messageID pgty
 }
 
 const GetToolExecutionsByStatus = `-- name: GetToolExecutionsByStatus :many
-SELECT te.id, te.message_id, te.tool_name, te.input_data, te.output_data, te.status, te.error_message, te.execution_time_ms, te.started_at, te.completed_at FROM tool_executions te
+SELECT te.id, te.message_id, te.tool_name, te.input_data, te.output_data, te.status, te.error_message, te.execution_time_ms, te.started_at, te.completed_at
+FROM tool_executions te
 JOIN messages m ON te.message_id = m.id
 JOIN conversations c ON m.conversation_id = c.id
 WHERE c.user_id = $1
@@ -353,7 +357,8 @@ func (q *Queries) GetToolExecutionsByStatus(ctx context.Context, arg GetToolExec
 }
 
 const GetToolExecutionsByTool = `-- name: GetToolExecutionsByTool :many
-SELECT te.id, te.message_id, te.tool_name, te.input_data, te.output_data, te.status, te.error_message, te.execution_time_ms, te.started_at, te.completed_at FROM tool_executions te
+SELECT te.id, te.message_id, te.tool_name, te.input_data, te.output_data, te.status, te.error_message, te.execution_time_ms, te.started_at, te.completed_at
+FROM tool_executions te
 JOIN messages m ON te.message_id = m.id
 JOIN conversations c ON m.conversation_id = c.id
 WHERE te.tool_name = $1
@@ -406,7 +411,8 @@ func (q *Queries) GetToolExecutionsByTool(ctx context.Context, arg GetToolExecut
 }
 
 const GetToolExecutionsByUser = `-- name: GetToolExecutionsByUser :many
-SELECT te.id, te.message_id, te.tool_name, te.input_data, te.output_data, te.status, te.error_message, te.execution_time_ms, te.started_at, te.completed_at FROM tool_executions te
+SELECT te.id, te.message_id, te.tool_name, te.input_data, te.output_data, te.status, te.error_message, te.execution_time_ms, te.started_at, te.completed_at
+FROM tool_executions te
 JOIN messages m ON te.message_id = m.id
 JOIN conversations c ON m.conversation_id = c.id
 WHERE c.user_id = $1
@@ -573,8 +579,7 @@ SET
     output_data = $3,
     error_message = $4,
     execution_time_ms = $5,
-    completed_at = $6,
-    updated_at = NOW()
+    completed_at = $6
 WHERE id = $1
 RETURNING id, message_id, tool_name, input_data, output_data, status, error_message, execution_time_ms, started_at, completed_at
 `

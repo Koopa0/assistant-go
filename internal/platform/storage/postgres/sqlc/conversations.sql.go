@@ -8,10 +8,20 @@ package sqlc
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const ArchiveConversation = `-- name: ArchiveConversation :exec
+UPDATE conversations
+SET is_archived = true, updated_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) ArchiveConversation(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, ArchiveConversation, id)
+	return err
+}
 
 const CreateConversation = `-- name: CreateConversation :one
 INSERT INTO conversations (user_id, title, summary, metadata)
@@ -129,7 +139,7 @@ func (q *Queries) GetConversationsByUser(ctx context.Context, userID pgtype.UUID
 }
 
 const GetRecentConversations = `-- name: GetRecentConversations :many
-SELECT id, user_id, title, metadata, created_at, updated_at
+SELECT id, user_id, title, summary, metadata, is_archived, created_at, updated_at
 FROM conversations
 WHERE user_id = $1
 ORDER BY updated_at DESC
@@ -141,29 +151,22 @@ type GetRecentConversationsParams struct {
 	Limit  int32       `json:"limit"`
 }
 
-type GetRecentConversationsRow struct {
-	ID        pgtype.UUID     `json:"id"`
-	UserID    pgtype.UUID     `json:"user_id"`
-	Title     string          `json:"title"`
-	Metadata  json.RawMessage `json:"metadata"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
-}
-
-func (q *Queries) GetRecentConversations(ctx context.Context, arg GetRecentConversationsParams) ([]*GetRecentConversationsRow, error) {
+func (q *Queries) GetRecentConversations(ctx context.Context, arg GetRecentConversationsParams) ([]*Conversation, error) {
 	rows, err := q.db.Query(ctx, GetRecentConversations, arg.UserID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []*GetRecentConversationsRow{}
+	items := []*Conversation{}
 	for rows.Next() {
-		var i GetRecentConversationsRow
+		var i Conversation
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,
 			&i.Title,
+			&i.Summary,
 			&i.Metadata,
+			&i.IsArchived,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -178,7 +181,7 @@ func (q *Queries) GetRecentConversations(ctx context.Context, arg GetRecentConve
 }
 
 const SearchConversations = `-- name: SearchConversations :many
-SELECT id, user_id, title, metadata, created_at, updated_at
+SELECT id, user_id, title, summary, metadata, is_archived, created_at, updated_at
 FROM conversations
 WHERE user_id = $1 
   AND (title ILIKE '%' || $2 || '%' OR metadata::text ILIKE '%' || $2 || '%')
@@ -193,16 +196,7 @@ type SearchConversationsParams struct {
 	Offset  int32       `json:"offset"`
 }
 
-type SearchConversationsRow struct {
-	ID        pgtype.UUID     `json:"id"`
-	UserID    pgtype.UUID     `json:"user_id"`
-	Title     string          `json:"title"`
-	Metadata  json.RawMessage `json:"metadata"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
-}
-
-func (q *Queries) SearchConversations(ctx context.Context, arg SearchConversationsParams) ([]*SearchConversationsRow, error) {
+func (q *Queries) SearchConversations(ctx context.Context, arg SearchConversationsParams) ([]*Conversation, error) {
 	rows, err := q.db.Query(ctx, SearchConversations,
 		arg.UserID,
 		arg.Column2,
@@ -213,14 +207,16 @@ func (q *Queries) SearchConversations(ctx context.Context, arg SearchConversatio
 		return nil, err
 	}
 	defer rows.Close()
-	items := []*SearchConversationsRow{}
+	items := []*Conversation{}
 	for rows.Next() {
-		var i SearchConversationsRow
+		var i Conversation
 		if err := rows.Scan(
 			&i.ID,
 			&i.UserID,
 			&i.Title,
+			&i.Summary,
 			&i.Metadata,
+			&i.IsArchived,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -238,7 +234,7 @@ const UpdateConversation = `-- name: UpdateConversation :one
 UPDATE conversations
 SET title = $2, metadata = $3, updated_at = NOW()
 WHERE id = $1
-RETURNING id, user_id, title, metadata, created_at, updated_at
+RETURNING id, user_id, title, summary, metadata, is_archived, created_at, updated_at
 `
 
 type UpdateConversationParams struct {
@@ -247,23 +243,16 @@ type UpdateConversationParams struct {
 	Metadata json.RawMessage `json:"metadata"`
 }
 
-type UpdateConversationRow struct {
-	ID        pgtype.UUID     `json:"id"`
-	UserID    pgtype.UUID     `json:"user_id"`
-	Title     string          `json:"title"`
-	Metadata  json.RawMessage `json:"metadata"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
-}
-
-func (q *Queries) UpdateConversation(ctx context.Context, arg UpdateConversationParams) (*UpdateConversationRow, error) {
+func (q *Queries) UpdateConversation(ctx context.Context, arg UpdateConversationParams) (*Conversation, error) {
 	row := q.db.QueryRow(ctx, UpdateConversation, arg.ID, arg.Title, arg.Metadata)
-	var i UpdateConversationRow
+	var i Conversation
 	err := row.Scan(
 		&i.ID,
 		&i.UserID,
 		&i.Title,
+		&i.Summary,
 		&i.Metadata,
+		&i.IsArchived,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

@@ -26,7 +26,6 @@ import (
 	"github.com/koopa0/assistant-go/internal/platform/server/middleware"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres/sqlc"
 	"github.com/koopa0/assistant-go/internal/system"
-	systemhttp "github.com/koopa0/assistant-go/internal/system/http"
 	toolhttp "github.com/koopa0/assistant-go/internal/tool/http"
 	"github.com/koopa0/assistant-go/internal/transport/sse"
 	"github.com/koopa0/assistant-go/internal/transport/websocket"
@@ -42,6 +41,7 @@ type Server struct {
 	config      config.ServerConfig
 	metrics     *observability.Metrics
 	rateLimiter *middleware.RateLimitMiddleware
+	authService user.JWTService
 }
 
 // New creates a new HTTP API server
@@ -123,16 +123,18 @@ func (s *Server) setupRoutes() {
 		sqlcQueries = s.assistant.GetDB().GetQueries()
 	}
 
-	// JWT secret for auth (in production, load from config)
+	// JWT secret 必須從配置載入，不允許預設值
 	jwtSecret := s.config.Security.JWTSecret
 	if jwtSecret == "" {
-		jwtSecret = "your-secret-key-change-in-production"
+		s.logger.Error("JWT secret 未配置，請設定 SECURITY_JWT_SECRET 環境變數")
+		panic("JWT secret is required for production")
 	}
 
 	// === Domain-Driven API Services ===
 
 	// Auth Service
 	authService := user.NewAuthService(sqlcQueries, s.logger, s.metrics, jwtSecret)
+	s.authService = authService // Save for middleware
 	authHandler := user.NewAuthHTTPHandler(authService)
 	authHandler.RegisterRoutes(s.mux)
 
@@ -169,18 +171,20 @@ func (s *Server) setupRoutes() {
 	// System Service
 	if sqlcQueries != nil {
 		systemService := system.NewService(s.assistant, sqlcQueries, s.logger, s.metrics)
-		systemHandler := systemhttp.NewHandler(systemService, s.logger)
+		systemHandler := system.NewHandler(systemService, s.logger)
 		systemHandler.RegisterRoutes(s.mux)
 	}
 
-	// Conversation Service
-	conversationService := conversation.NewConversationService(s.assistant.AsConversationInterface(), sqlcQueries, s.logger, s.metrics)
-	conversationHandler := conversation.NewHTTPHandler(conversationService)
-	conversationHandler.RegisterRoutes(s.mux)
+	// Conversation Service - Commented out because EnhancedHTTPHandler already registers these routes
+	// conversationService := conversation.NewConversationService(s.assistant.AsConversationInterface(), sqlcQueries, s.logger, s.metrics)
+	// conversationHandler := conversation.NewHTTPHandler(conversationService)
+	// conversationHandler.RegisterRoutes(s.mux)
 
 	// WebSocket Service
 	wsService := websocket.NewWebSocketService(s.assistant, s.logger, s.metrics)
-	wsHandler := websocket.NewHTTPHandler(wsService, s.logger)
+	// WebSocket 使用相同的 JWT secret（已在上面驗證過）
+	wsAuthService := user.NewAuthService(sqlcQueries, s.logger, s.metrics, jwtSecret)
+	wsHandler := websocket.NewHTTPHandler(wsService, wsAuthService, s.logger)
 	wsHandler.RegisterRoutes(s.mux)
 	// Start WebSocket background tasks
 	go wsService.Start(context.Background())
@@ -236,8 +240,9 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/health", s.handleHealth)
 	s.mux.HandleFunc("GET /api/status", s.handleStatus)
 	s.mux.HandleFunc("POST /api/query", s.handleQuery)
-	s.mux.HandleFunc("GET /api/conversations", s.handleListConversations)
-	s.mux.HandleFunc("GET /api/conversations/{id}", s.handleGetConversation)
+	// Conversation routes are already registered by conversationHandler above
+	// s.mux.HandleFunc("GET /api/conversations", s.handleListConversations)
+	// s.mux.HandleFunc("GET /api/conversations/{id}", s.handleGetConversation)
 	s.mux.HandleFunc("DELETE /api/conversations/{id}", s.handleDeleteConversation)
 	s.mux.HandleFunc("GET /api/tools", s.handleListTools)
 	s.mux.HandleFunc("GET /api/tools/{name}", s.handleGetTool)
@@ -267,6 +272,11 @@ func (s *Server) withMiddleware(handler http.Handler) http.Handler {
 
 	// Rate limiting middleware
 	handler = s.rateLimitMiddleware(handler)
+
+	// Authentication middleware (innermost, closest to handlers)
+	if s.authService != nil {
+		handler = s.authMiddleware(s.authService)(handler)
+	}
 
 	return handler
 }
@@ -315,6 +325,11 @@ func (s *Server) handleQuery(w http.ResponseWriter, r *http.Request) {
 		s.logger.Warn("Invalid query request", slog.Any("error", err))
 		http.Error(w, "Invalid request", http.StatusBadRequest)
 		return
+	}
+
+	// Extract user ID from context (set by auth middleware)
+	if userID, ok := ctx.Value("user_id").(string); ok {
+		request.UserID = &userID
 	}
 
 	response, err := s.assistant.ProcessQueryRequest(ctx, &request)

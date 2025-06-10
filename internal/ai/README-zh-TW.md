@@ -1,421 +1,481 @@
-# AI 提供者管理系統
+# 🧠 AI Package - 人工智慧服務整合套件
 
-## 概述
+## 📋 概述
 
-AI 提供者管理系統為與多個 AI 服務提供者（包括 Claude (Anthropic) 和 Gemini (Google)）互動提供統一介面。此套件實作了工廠模式，具備完善的錯誤處理、速率限制和可觀測性功能。
+AI 套件是 Assistant 系統的核心智慧引擎，負責整合多個 AI 提供者（Claude、Gemini），提供統一的介面來處理自然語言理解、程式碼分析、智慧建議等功能。這個套件實現了提供者抽象、錯誤處理、串流支援、嵌入向量等關鍵功能。
 
-## 架構
+## 🏗️ 架構設計
 
-```
-internal/ai/
-├── provider.go          # 提供者介面和類型
-├── factory.go          # 提供者工廠實作
-├── init.go             # 初始化和配置
-├── claude/
-│   └── client.go       # Claude API 客戶端實作
-├── gemini/
-│   └── client.go       # Gemini API 客戶端實作
-└── embeddings/
-    ├── service.go      # 嵌入向量生成服務
-    └── service_test.go # 完整測試套件
-```
-
-## 主要功能
-
-### 🤖 **多提供者支援**
-- **Claude 整合**：完整的 Anthropic Claude API 支援，包含串流功能
-- **Gemini 整合**：Google Gemini API 與進階模型配置
-- **統一介面**：跨所有提供者的一致 API
-- **提供者選擇**：基於可用性和成本的動態提供者選擇
-
-### 🛡️ **生產就緒功能**
-- **速率限制**：智慧速率限制與指數退避
-- **錯誤處理**：包含上下文的完整錯誤包裝
-- **健康檢查**：提供者健康監控和故障轉移
-- **Token 追蹤**：使用量監控和成本優化
-- **重試邏輯**：可配置的重試策略與斷路器
-
-### 📊 **可觀測性**
-- **指標收集**：請求延遲、token 使用量、錯誤率
-- **結構化日誌**：詳細的請求/回應日誌與上下文
-- **效能追蹤**：回應時間分析和優化
-- **成本監控**：Token 使用量和 API 成本追蹤
-
-## 核心元件
-
-### 提供者介面
+### 核心介面
 
 ```go
-type Provider interface {
-    // 帶上下文的聊天完成
-    ChatCompletion(ctx context.Context, req ChatRequest) (*ChatResponse, error)
+// Service 定義了 AI 服務的統一介面
+type Service interface {
+    // Chat 發送聊天請求並返回完整回應
+    Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error)
     
-    // 串流聊天完成
-    ChatCompletionStream(ctx context.Context, req ChatRequest) (<-chan ChatResponse, error)
+    // ChatStream 發送聊天請求並返回串流回應
+    ChatStream(ctx context.Context, req ChatRequest) (<-chan StreamEvent, error)
     
-    // 提供者元資料和功能
+    // GenerateEmbedding 生成文字的向量嵌入
+    GenerateEmbedding(ctx context.Context, text string) ([]float64, error)
+    
+    // GetCapabilities 返回當前 AI 提供者的能力
     GetCapabilities() Capabilities
-    GetName() string
-    GetHealth() HealthStatus
+}
+```
+
+### 提供者架構
+
+```go
+// 支援的 AI 提供者
+type Provider string
+
+const (
+    ProviderClaude Provider = "claude"  // Anthropic Claude
+    ProviderGemini Provider = "gemini"  // Google Gemini
+)
+
+// 提供者管理
+type ProviderManager struct {
+    primary   Provider           // 主要提供者
+    fallback  Provider           // 備用提供者
+    providers map[Provider]Service // 提供者實例
+    health    map[Provider]bool    // 健康狀態
+}
+```
+
+## 🔧 核心功能
+
+### 1. 多提供者支援 (Multi-Provider Support)
+
+#### Claude 整合
+```go
+// Claude 客戶端配置
+type ClaudeClient struct {
+    apiKey     string
+    model      string           // claude-3-opus, claude-3-sonnet 等
+    maxTokens  int
+    httpClient *http.Client
+}
+
+// 特性支援
+- 超長上下文窗口（200K tokens）
+- 優秀的程式碼理解能力
+- 支援系統提示詞
+- 即時串流回應
+```
+
+#### Gemini 整合
+```go
+// Gemini 客戶端配置
+type GeminiClient struct {
+    apiKey        string
+    model         string         // gemini-pro, gemini-pro-vision 等
+    generationConfig *genai.GenerationConfig
+    client        *genai.Client
+}
+
+// 特性支援
+- 多模態支援（文字、圖片）
+- 函數調用能力
+- 高速回應
+- 成本效益
+```
+
+### 2. 智慧路由 (Intelligent Routing)
+
+```go
+// 根據請求特性選擇最佳提供者
+func (m *ProviderManager) RouteRequest(req ChatRequest) Provider {
+    // 考慮因素：
+    // 1. 請求複雜度
+    if req.RequiresDeepAnalysis() {
+        return ProviderClaude // Claude 更擅長深度分析
+    }
     
-    // 資源管理
-    Close() error
+    // 2. 成本考量
+    if req.Priority == PriorityLow {
+        return ProviderGemini // Gemini 成本更低
+    }
+    
+    // 3. 可用性
+    if !m.health[m.primary] {
+        return m.fallback // 使用備用提供者
+    }
+    
+    // 4. 特殊功能需求
+    if req.RequiresVision() {
+        return ProviderGemini // Gemini 支援視覺
+    }
+    
+    return m.primary
 }
 ```
 
-### 工廠模式
+### 3. 串流處理 (Stream Processing)
 
 ```go
-type Factory struct {
-    providers map[string]Provider
-    config    *Config
-    metrics   *Metrics
-    logger    *slog.Logger
+// 統一的串流事件
+type StreamEvent struct {
+    Type      StreamEventType
+    Content   string          // 文字內容
+    Delta     string          // 增量內容
+    Error     error           // 錯誤資訊
+    Metadata  map[string]any  // 元資料
+    Timestamp time.Time
 }
 
-func NewFactory(config *Config) (*Factory, error)
-func (f *Factory) GetProvider(name string) (Provider, error)
-func (f *Factory) GetBestProvider(criteria Criteria) (Provider, error)
+// 串流處理器
+type StreamProcessor struct {
+    // 緩衝管理
+    buffer     *bytes.Buffer
+    bufferSize int
+    
+    // 錯誤恢復
+    retryCount int
+    maxRetries int
+    
+    // 進度追蹤
+    tokenCount int
+    startTime  time.Time
+}
 ```
 
-### 提供者類型
-
-- **Claude 提供者**：Anthropic Claude API 整合
-- **Gemini 提供者**：Google Gemini API 整合
-- **Mock 提供者**：測試和開發支援
-
-## 配置
-
-### 環境變數
-
-```bash
-# Claude 配置
-CLAUDE_API_KEY=your_claude_api_key
-CLAUDE_MODEL=claude-3-sonnet-20240229
-CLAUDE_MAX_TOKENS=4096
-
-# Gemini 配置
-GEMINI_API_KEY=your_gemini_api_key
-GEMINI_MODEL=gemini-pro
-GEMINI_TEMPERATURE=0.7
-
-# 速率限制
-AI_RATE_LIMIT_PER_MINUTE=60
-AI_RATE_LIMIT_BURST=10
-AI_REQUEST_TIMEOUT=30s
-```
-
-### YAML 配置
-
-```yaml
-ai:
-  providers:
-    claude:
-      enabled: true
-      model: "claude-3-sonnet-20240229"
-      max_tokens: 4096
-      temperature: 0.0
-      rate_limit:
-        requests_per_minute: 60
-        burst: 10
-    gemini:
-      enabled: true
-      model: "gemini-pro"
-      temperature: 0.7
-      safety_settings:
-        harassment: "BLOCK_MEDIUM_AND_ABOVE"
-        hate_speech: "BLOCK_MEDIUM_AND_ABOVE"
-  retry:
-    max_attempts: 3
-    initial_delay: "1s"
-    max_delay: "30s"
-    multiplier: 2.0
-```
-
-## 使用範例
-
-### 基本聊天完成
+### 4. 嵌入向量服務 (Embeddings Service)
 
 ```go
-// 初始化工廠
-factory, err := ai.NewFactory(config)
-if err != nil {
-    return fmt.Errorf("建立 AI 工廠失敗: %w", err)
+// 嵌入向量服務介面
+type EmbeddingService interface {
+    // 生成單一文字的嵌入向量
+    GenerateEmbedding(ctx context.Context, text string) ([]float64, error)
+    
+    // 批量生成嵌入向量
+    GenerateEmbeddings(ctx context.Context, texts []string) ([][]float64, error)
+    
+    // 計算向量相似度
+    CosineSimilarity(a, b []float64) float64
 }
 
-// 取得提供者
-provider, err := factory.GetProvider("claude")
-if err != nil {
-    return fmt.Errorf("取得提供者失敗: %w", err)
+// 實現細節
+type embeddingService struct {
+    provider   string          // 使用的嵌入模型
+    dimension  int            // 向量維度
+    cache      *lru.Cache     // LRU 快取
+    batchSize  int            // 批次大小
+}
+```
+
+## 📊 進階功能
+
+### 1. 提示詞工程 (Prompt Engineering)
+
+```go
+// 提示詞模板系統
+type PromptTemplate struct {
+    Name        string
+    Template    string
+    Variables   []string
+    Constraints []string
+    Examples    []Example
 }
 
-// 聊天完成
-response, err := provider.ChatCompletion(ctx, ai.ChatRequest{
+// 動態提示詞生成
+func (s *promptService) GeneratePrompt(
+    template PromptTemplate,
+    context map[string]interface{},
+) (string, error) {
+    // 1. 驗證必要變數
+    if err := s.validateVariables(template, context); err != nil {
+        return "", err
+    }
+    
+    // 2. 注入上下文
+    prompt := s.injectContext(template.Template, context)
+    
+    // 3. 添加約束條件
+    prompt = s.applyConstraints(prompt, template.Constraints)
+    
+    // 4. 添加範例（Few-shot learning）
+    if len(template.Examples) > 0 {
+        prompt = s.addExamples(prompt, template.Examples)
+    }
+    
+    return prompt, nil
+}
+```
+
+### 2. Token 管理 (Token Management)
+
+```go
+// Token 計數器
+type TokenCounter interface {
+    // 計算文字的 token 數量
+    Count(text string) int
+    
+    // 估算回應所需的 token
+    EstimateResponseTokens(prompt string) int
+    
+    // 截斷文字到指定 token 數
+    Truncate(text string, maxTokens int) string
+}
+
+// 智慧 token 優化
+type TokenOptimizer struct {
+    maxContextTokens int
+    reserveTokens    int  // 為回應保留的 token
+    
+    // 優化策略
+    strategies []OptimizationStrategy
+}
+
+// 優化策略範例
+func (o *TokenOptimizer) Optimize(messages []Message) []Message {
+    // 1. 移除冗餘內容
+    messages = o.removeRedundancy(messages)
+    
+    // 2. 摘要長對話
+    messages = o.summarizeOldMessages(messages)
+    
+    // 3. 壓縮系統提示詞
+    messages = o.compressSystemPrompt(messages)
+    
+    return messages
+}
+```
+
+### 3. 錯誤處理與恢復 (Error Handling & Recovery)
+
+```go
+// AI 錯誤類型
+type AIError struct {
+    Type        ErrorType
+    Provider    Provider
+    StatusCode  int
+    Message     string
+    Retryable   bool
+    RetryAfter  time.Duration
+}
+
+// 錯誤恢復策略
+type RecoveryStrategy struct {
+    // 重試策略
+    MaxRetries     int
+    BackoffFactor  float64
+    
+    // 降級策略
+    FallbackProvider Provider
+    SimplifyRequest  bool
+    
+    // 斷路器
+    CircuitBreaker *CircuitBreaker
+}
+
+// 智慧錯誤處理
+func (s *Service) HandleError(err error, strategy RecoveryStrategy) error {
+    switch e := err.(type) {
+    case *RateLimitError:
+        // 等待後重試
+        time.Sleep(e.RetryAfter)
+        return s.retryWithBackoff(strategy)
+        
+    case *ContextLengthError:
+        // 優化上下文後重試
+        return s.retryWithOptimizedContext()
+        
+    case *ProviderError:
+        // 切換到備用提供者
+        return s.fallbackToAlternative(strategy.FallbackProvider)
+        
+    default:
+        return fmt.Errorf("unrecoverable AI error: %w", err)
+    }
+}
+```
+
+## 🔍 使用範例
+
+### 基本聊天
+```go
+// 創建 AI 服務
+aiService := ai.NewService(
+    ai.WithProvider(ai.ProviderClaude),
+    ai.WithAPIKey(apiKey),
+    ai.WithModel("claude-3-opus-20240229"),
+)
+
+// 發送聊天請求
+response, err := aiService.Chat(ctx, ai.ChatRequest{
     Messages: []ai.Message{
-        {Role: "user", Content: "解釋量子計算"},
+        {
+            Role:    ai.RoleUser,
+            Content: "解釋 Go 的 interface 概念",
+        },
     },
     MaxTokens:   1000,
     Temperature: 0.7,
 })
-if err != nil {
-    return fmt.Errorf("聊天完成失敗: %w", err)
-}
-
-fmt.Println(response.Content)
 ```
 
-### 串流聊天
-
+### 串流回應
 ```go
-// 串流完成
-stream, err := provider.ChatCompletionStream(ctx, request)
-if err != nil {
-    return fmt.Errorf("啟動串流失敗: %w", err)
-}
-
-for response := range stream {
-    if response.Error != nil {
-        log.Printf("串流錯誤: %v", response.Error)
-        continue
-    }
-    fmt.Print(response.Delta) // 印出增量內容
-}
-```
-
-### 提供者選擇
-
-```go
-// 根據條件取得最佳提供者
-provider, err := factory.GetBestProvider(ai.Criteria{
-    ModelType:     ai.ModelTypeChat,
-    MaxLatency:    time.Second * 5,
-    MaxCostPerToken: 0.001,
-    RequiredFeatures: []string{"streaming", "function_calling"},
+// 創建串流請求
+stream, err := aiService.ChatStream(ctx, ai.ChatRequest{
+    Messages: messages,
+    Options: ai.StreamOptions{
+        ChunkSize:      100,
+        IncludeUsage:   true,
+        StopOnError:    false,
+    },
 })
+
+// 處理串流事件
+for event := range stream {
+    switch event.Type {
+    case ai.StreamEventTypeContent:
+        fmt.Print(event.Content)
+    case ai.StreamEventTypeError:
+        log.Error("串流錯誤", "error", event.Error)
+    case ai.StreamEventTypeEnd:
+        fmt.Printf("\n使用 tokens: %d\n", event.Metadata["usage"])
+    }
+}
 ```
 
 ### 嵌入向量生成
-
 ```go
-// 初始化嵌入服務
-embeddingService, err := embeddings.NewService(config, factory)
-if err != nil {
-    return fmt.Errorf("建立嵌入服務失敗: %w", err)
-}
+// 創建嵌入服務
+embedService := ai.NewEmbeddingService(
+    ai.WithEmbeddingModel("text-embedding-ada-002"),
+    ai.WithBatchSize(100),
+)
 
-// 生成嵌入向量
-vectors, err := embeddingService.GenerateEmbeddings(ctx, []string{
-    "機器學習正在改變軟體開發",
-    "Go 是建構可擴展系統的優秀語言",
+// 生成向量
+embeddings, err := embedService.GenerateEmbeddings(ctx, []string{
+    "Go 是一個靜態類型的編譯語言",
+    "Python 是一個動態類型的解釋語言",
+    "Rust 注重記憶體安全",
 })
-if err != nil {
-    return fmt.Errorf("生成嵌入向量失敗: %w", err)
-}
 
-// 儲存至向量資料庫
-err = embeddingService.Store(ctx, vectors)
+// 計算相似度
+similarity := embedService.CosineSimilarity(embeddings[0], embeddings[1])
+fmt.Printf("Go 與 Python 的相似度: %.2f\n", similarity)
 ```
 
-## 錯誤處理
+## 🧪 測試策略
 
-### 錯誤類型
-
+### 單元測試
 ```go
-type ProviderError struct {
-    Provider string
-    Code     ErrorCode
-    Message  string
-    Retryable bool
-    Cause    error
-}
-
-const (
-    ErrCodeRateLimit     ErrorCode = "RATE_LIMIT"
-    ErrCodeInvalidRequest ErrorCode = "INVALID_REQUEST"
-    ErrCodeProviderDown  ErrorCode = "PROVIDER_DOWN"
-    ErrCodeTokenLimit    ErrorCode = "TOKEN_LIMIT"
-    ErrCodeTimeout       ErrorCode = "TIMEOUT"
-)
-```
-
-### 重試策略
-
-```go
-func (c *ClaudeClient) ChatCompletion(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
-    return retry.Do(ctx, func() (*ChatResponse, error) {
-        return c.doRequest(ctx, req)
-    }, retry.Config{
-        MaxAttempts: 3,
-        Delay:       time.Second,
-        Multiplier:  2.0,
-        ShouldRetry: func(err error) bool {
-            if providerErr, ok := err.(*ProviderError); ok {
-                return providerErr.Retryable
-            }
-            return false
-        },
+func TestAIService_Chat(t *testing.T) {
+    // 使用模擬客戶端
+    mockClient := NewMockAIClient()
+    service := ai.NewService(ai.WithClient(mockClient))
+    
+    // 測試正常情況
+    t.Run("successful chat", func(t *testing.T) {
+        mockClient.SetResponse(&ai.ChatResponse{
+            Content: "測試回應",
+            Usage:   ai.Usage{TotalTokens: 100},
+        })
+        
+        response, err := service.Chat(ctx, testRequest)
+        require.NoError(t, err)
+        assert.Equal(t, "測試回應", response.Content)
+    })
+    
+    // 測試錯誤處理
+    t.Run("rate limit error", func(t *testing.T) {
+        mockClient.SetError(&ai.RateLimitError{
+            RetryAfter: 60 * time.Second,
+        })
+        
+        _, err := service.Chat(ctx, testRequest)
+        assert.ErrorIs(t, err, ai.ErrRateLimit)
     })
 }
 ```
 
-## 測試
+## 🔧 配置選項
 
-### 測試覆蓋率
-
-- **單元測試**：提供者實作、工廠邏輯
-- **整合測試**：真實 API 互動（使用測試金鑰）
-- **效能測試**：延遲和吞吐量基準測試
-- **錯誤測試**：失敗場景和復原
-
-### Mock 提供者
-
-```go
-func TestWithMockProvider(t *testing.T) {
-    factory := ai.NewFactory(&ai.Config{
-        Providers: map[string]ai.ProviderConfig{
-            "mock": {
-                Type:    "mock",
-                Enabled: true,
-            },
-        },
-    })
+```yaml
+ai:
+  # 提供者配置
+  providers:
+    claude:
+      api_key: ${CLAUDE_API_KEY}
+      model: claude-3-opus-20240229
+      max_tokens: 4096
+      temperature: 0.7
+      
+    gemini:
+      api_key: ${GEMINI_API_KEY}
+      model: gemini-pro
+      max_tokens: 8192
+      temperature: 0.8
+  
+  # 路由配置
+  routing:
+    primary_provider: claude
+    fallback_provider: gemini
+    health_check_interval: 30s
     
-    provider, err := factory.GetProvider("mock")
-    require.NoError(t, err)
+  # 串流配置
+  streaming:
+    buffer_size: 4096
+    chunk_timeout: 100ms
+    enable_compression: true
     
-    response, err := provider.ChatCompletion(ctx, request)
-    assert.NoError(t, err)
-    assert.Contains(t, response.Content, "mock response")
-}
+  # Token 管理
+  tokens:
+    max_context_tokens: 100000
+    reserve_response_tokens: 2000
+    enable_optimization: true
+    
+  # 嵌入向量
+  embeddings:
+    provider: openai
+    model: text-embedding-ada-002
+    cache_size: 10000
+    batch_size: 100
 ```
 
-## 效能優化
+## 📈 效能優化
 
-### 快取策略
+1. **快取策略**
+   - LRU 快取頻繁請求
+   - 嵌入向量快取
+   - 提示詞模板快取
 
-```go
-type CachedProvider struct {
-    provider Provider
-    cache    cache.Cache
-    ttl      time.Duration
-}
+2. **批次處理**
+   - 批量嵌入向量生成
+   - 請求合併優化
+   - 非同步處理佇列
 
-func (cp *CachedProvider) ChatCompletion(ctx context.Context, req ChatRequest) (*ChatResponse, error) {
-    key := generateCacheKey(req)
-    
-    if cached, found := cp.cache.Get(key); found {
-        return cached.(*ChatResponse), nil
-    }
-    
-    response, err := cp.provider.ChatCompletion(ctx, req)
-    if err != nil {
-        return nil, err
-    }
-    
-    cp.cache.Set(key, response, cp.ttl)
-    return response, nil
-}
-```
+3. **資源管理**
+   - 連線池管理
+   - Token 預算控制
+   - 記憶體使用優化
 
-### 連線池
+## 🚀 未來規劃
 
-```go
-type ClientPool struct {
-    clients chan *http.Client
-    factory func() *http.Client
-}
+1. **更多 AI 提供者**
+   - OpenAI GPT-4 整合
+   - Llama 本地模型支援
+   - 專業領域模型
 
-func NewClientPool(size int) *ClientPool {
-    pool := &ClientPool{
-        clients: make(chan *http.Client, size),
-        factory: createHTTPClient,
-    }
-    
-    for i := 0; i < size; i++ {
-        pool.clients <- pool.factory()
-    }
-    
-    return pool
-}
-```
+2. **進階功能**
+   - 多模態支援（圖片、音訊）
+   - 函數調用（Function Calling）
+   - 智慧對話管理
 
-## 監控和指標
+3. **優化增強**
+   - 分散式推理
+   - 邊緣部署支援
+   - 自適應模型選擇
 
-### 關鍵指標
+## 📚 相關文件
 
-- **請求延遲**：P50、P95、P99 回應時間
-- **Token 使用量**：輸入/輸出 tokens、成本追蹤
-- **錯誤率**：按類型和提供者的錯誤頻率
-- **提供者健康**：可用性和效能分數
-
-### Prometheus 指標
-
-```go
-var (
-    requestDuration = prometheus.NewHistogramVec(
-        prometheus.HistogramOpts{
-            Name: "ai_request_duration_seconds",
-            Help: "AI 請求持續時間（秒）",
-        },
-        []string{"provider", "model", "operation"},
-    )
-    
-    tokenUsage = prometheus.NewCounterVec(
-        prometheus.CounterOpts{
-            Name: "ai_tokens_total",
-            Help: "AI tokens 總消耗量",
-        },
-        []string{"provider", "model", "type"},
-    )
-)
-```
-
-## 安全性
-
-### API 金鑰管理
-
-- **環境變數**：安全的金鑰儲存
-- **金鑰輪換**：支援優雅的金鑰更新
-- **存取控制**：提供者特定權限
-- **稽核日誌**：請求/回應追蹤
-
-### 資料隱私
-
-- **請求清理**：記錄前移除敏感資料
-- **回應過濾**：遮罩或編輯敏感輸出
-- **本地處理**：盡可能保持敏感資料在本地
-- **合規性**：GDPR、SOX 和產業標準合規
-
-## 未來增強功能
-
-### 計劃中的功能
-
-1. **額外提供者**：OpenAI GPT-4、Azure OpenAI、AWS Bedrock
-2. **函數呼叫**：結構化函數/工具呼叫支援
-3. **多模態**：圖像和音訊處理能力
-4. **微調**：自訂模型訓練和部署
-5. **邊緣部署**：本地模型推理支援
-
-### 整合路線圖
-
-- **LangChain 整合**：增強的鏈和代理支援
-- **向量資料庫**：改進的嵌入和檢索
-- **模型上下文協議**：當可用時支援 MCP
-- **Kubernetes Operator**：可擴展的部署管理
-
-## 貢獻
-
-為 AI 提供者系統貢獻時：
-
-1. **遵循介面**：完整實作 Provider 介面
-2. **添加測試**：包括單元、整合和效能測試
-3. **處理錯誤**：適當的錯誤包裝和重試邏輯
-4. **監控資源**：追蹤 token 使用量和 API 成本
-5. **文件更新**：更新 README 和程式碼文件
-
-## 相關文件
-
-- [助理核心](../assistant/README.md) - 主要協調系統
-- [嵌入服務](embeddings/README.md) - 向量生成和搜尋
-- [配置](../config/README.md) - 系統配置管理
-- [可觀測性](../observability/README.md) - 監控和日誌
+- [Assistant Package README](../assistant/README-zh-TW.md) - 助理核心套件
+- [Embeddings 子套件](./embeddings/README.md) - 嵌入向量詳細說明
+- [Prompts 子套件](./prompts/README.md) - 提示詞工程指南
+- [主要架構文件](../../CLAUDE-ARCHITECTURE.md) - 系統架構指南

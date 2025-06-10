@@ -240,9 +240,39 @@ func (s *AuthService) Register(ctx context.Context, email, password, name string
 	return userID, nil
 }
 
-// ValidateToken validates a JWT token and returns the claims
-func (s *AuthService) ValidateToken(tokenString string) (*JWTClaims, error) {
-	return s.validateToken(tokenString)
+// ValidateToken validates a JWT token and returns the user ID
+func (s *AuthService) ValidateToken(tokenString string) (string, error) {
+	claims, err := s.validateToken(tokenString)
+	if err != nil {
+		return "", err
+	}
+	return claims.UserID, nil
+}
+
+// ValidateTokenClaims validates a JWT token and returns the claims
+func (s *AuthService) ValidateTokenClaims(tokenString string) (*TokenClaims, error) {
+	claims, err := s.validateToken(tokenString)
+	if err != nil {
+		return nil, err
+	}
+	// Convert JWTClaims to TokenClaims
+	return &TokenClaims{
+		UserID:           claims.UserID,
+		Email:            claims.Email,
+		Role:             claims.Role,
+		RegisteredClaims: claims.RegisteredClaims,
+	}, nil
+}
+
+// GenerateAccessToken generates a JWT access token
+func (s *AuthService) GenerateAccessToken(userID, email, role string) (string, error) {
+	return s.generateToken(userID, email, role, "access", 24*time.Hour)
+}
+
+// GenerateRefreshToken generates a JWT refresh token
+func (s *AuthService) GenerateRefreshToken(userID string) (string, error) {
+	// Get user info to include in token
+	return s.generateToken(userID, "", "user", "refresh", 7*24*time.Hour)
 }
 
 // Helper methods
@@ -301,14 +331,40 @@ func (s *AuthService) generateResetToken() string {
 
 // validateResetToken validates a password reset token
 func (s *AuthService) validateResetToken(token string) bool {
-	// TODO: Implement proper token validation with database and expiry
-	return len(token) > 20
+	// For now, validate token format and length
+	// In production, this should check against a database table with expiry
+	// Expected format: base64 encoded 32 bytes = 44 characters
+	if len(token) < 32 || len(token) > 64 {
+		return false
+	}
+
+	// Basic base64 validation
+	for _, r := range token {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '+' || r == '/' || r == '=' || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // validateEmailToken validates an email verification token
 func (s *AuthService) validateEmailToken(token string) bool {
-	// TODO: Implement proper token validation with database
-	return len(token) > 10
+	// For now, validate token format and length
+	// In production, this should check against a database table with expiry
+	// Expected format: UUID format or base64 encoded token
+	if len(token) < 16 || len(token) > 64 {
+		return false
+	}
+
+	// Basic validation - alphanumeric with hyphens
+	for _, r := range token {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // sendVerificationEmail sends a verification email to the user

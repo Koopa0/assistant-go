@@ -22,7 +22,15 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 
-	// Create demo config
+	// Check required environment variables
+	if os.Getenv("CLAUDE_API_KEY") == "" {
+		log.Fatal("Please set CLAUDE_API_KEY environment variable")
+	}
+	if os.Getenv("DATABASE_URL") == "" {
+		log.Fatal("Please set DATABASE_URL environment variable (e.g., postgres://user:pass@localhost/assistant)")
+	}
+
+	// Create config
 	cfg := &config.Config{
 		Mode: "demo",
 		AI: config.AIConfig{
@@ -34,13 +42,22 @@ func main() {
 				Temperature: 0.7,
 			},
 		},
+		Database: config.DatabaseConfig{
+			URL: os.Getenv("DATABASE_URL"),
+		},
 	}
 
-	// Use mock database for demo
-	db := postgres.NewMockClient(logger)
+	// Create context
+	ctx := context.Background()
+
+	// Connect to real database
+	db, err := postgres.NewClient(ctx, cfg.Database)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
+	}
+	defer db.Close()
 
 	// Create assistant
-	ctx := context.Background()
 	asst, err := assistant.New(ctx, cfg, db, logger)
 	if err != nil {
 		log.Fatalf("Failed to create assistant: %v", err)

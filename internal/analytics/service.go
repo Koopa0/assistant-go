@@ -3,6 +3,7 @@ package analytics
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -15,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/koopa0/assistant-go/internal/platform/observability"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres/sqlc"
+	"github.com/koopa0/assistant-go/internal/user"
 )
 
 // AnalyticsService handles analytics and visualization logic
@@ -112,10 +114,9 @@ func (s *AnalyticsService) GetActivityAnalytics(ctx context.Context, days int) (
 	}
 
 	// Get current user ID from context
-	userID := ctx.Value("user_id")
-	if userID == nil {
-		userID = "a0000000-0000-4000-8000-000000000001" // Default user ID
-		s.logger.Warn("No user ID in context, using default", slog.String("default_id", userID.(string)))
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return nil, nil, errors.New("authentication required")
 	}
 
 	// Calculate date range
@@ -123,7 +124,7 @@ func (s *AnalyticsService) GetActivityAnalytics(ctx context.Context, days int) (
 	startDate := endDate.AddDate(0, 0, -days)
 
 	// Query learning events for activity data
-	userUUID, err := uuid.Parse(userID.(string))
+	userUUID, err := uuid.Parse(userID)
 	if err != nil {
 		s.logger.Error("Invalid user ID", slog.Any("error", err))
 		return nil, nil, fmt.Errorf("invalid user ID: %w", err)
@@ -140,7 +141,7 @@ func (s *AnalyticsService) GetActivityAnalytics(ctx context.Context, days int) (
 	if err != nil {
 		s.logger.Error("Failed to get learning events", slog.Any("error", err))
 		// Fall back to tool executions if learning events are not available
-		events = s.getFallbackActivityData(ctx, userID.(string), startDate, endDate)
+		events = s.getFallbackActivityData(ctx, userID, startDate, endDate)
 	}
 
 	// Process events into daily activities
@@ -292,10 +293,9 @@ func (s *AnalyticsService) GetActivityAnalytics(ctx context.Context, days int) (
 // GetActivityHeatmap returns activity heatmap data
 func (s *AnalyticsService) GetActivityHeatmap(ctx context.Context) (*HeatmapData, []string, []string, error) {
 	// Get current user ID from context
-	userID := ctx.Value("user_id")
-	if userID == nil {
-		userID = "a0000000-0000-4000-8000-000000000001" // Default user ID
-		s.logger.Warn("No user ID in context, using default", slog.String("default_id", userID.(string)))
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return nil, nil, nil, errors.New("authentication required")
 	}
 
 	// Get data for the last 4 weeks to build a representative heatmap
@@ -303,7 +303,7 @@ func (s *AnalyticsService) GetActivityHeatmap(ctx context.Context) (*HeatmapData
 	startDate := endDate.AddDate(0, 0, -28) // 4 weeks
 
 	// Query learning events
-	userUUID, err := uuid.Parse(userID.(string))
+	userUUID, err := uuid.Parse(userID)
 	if err != nil {
 		s.logger.Error("Invalid user ID", slog.Any("error", err))
 		return nil, nil, nil, fmt.Errorf("invalid user ID: %w", err)
@@ -320,7 +320,7 @@ func (s *AnalyticsService) GetActivityHeatmap(ctx context.Context) (*HeatmapData
 	if err != nil {
 		s.logger.Error("Failed to get learning events", slog.Any("error", err))
 		// Fall back to tool executions
-		events = s.getFallbackActivityData(ctx, userID.(string), startDate, endDate)
+		events = s.getFallbackActivityData(ctx, userID, startDate, endDate)
 	}
 
 	// Initialize heatmap data structure (7 days x 24 hours)
@@ -465,10 +465,9 @@ func (s *AnalyticsService) GetProductivityTrends(ctx context.Context, period str
 	}
 
 	// Get current user ID from context
-	userID := ctx.Value("user_id")
-	if userID == nil {
-		userID = "a0000000-0000-4000-8000-000000000001" // Default user ID
-		s.logger.Warn("No user ID in context, using default", slog.String("default_id", userID.(string)))
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return nil, nil, errors.New("authentication required")
 	}
 
 	// Determine date range based on period
@@ -483,7 +482,7 @@ func (s *AnalyticsService) GetProductivityTrends(ctx context.Context, period str
 	startDate := endDate.AddDate(0, 0, -days)
 
 	// Query execution data for productivity metrics
-	userUUID, err := uuid.Parse(userID.(string))
+	userUUID, err := uuid.Parse(userID)
 	if err != nil {
 		s.logger.Error("Invalid user ID", slog.Any("error", err))
 		return nil, nil, fmt.Errorf("invalid user ID: %w", err)
@@ -680,13 +679,12 @@ func (s *AnalyticsService) GetProductivityTrends(ctx context.Context, period str
 // GetDashboardData returns comprehensive dashboard data
 func (s *AnalyticsService) GetDashboardData(ctx context.Context) (map[string]interface{}, error) {
 	// Get current user ID from context
-	userID := ctx.Value("user_id")
-	if userID == nil {
-		userID = "a0000000-0000-4000-8000-000000000001" // Default user ID
-		s.logger.Warn("No user ID in context, using default", slog.String("default_id", userID.(string)))
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return nil, errors.New("authentication required")
 	}
 
-	userUUID, err := uuid.Parse(userID.(string))
+	userUUID, err := uuid.Parse(userID)
 	if err != nil {
 		s.logger.Error("Invalid user ID", slog.Any("error", err))
 		return nil, fmt.Errorf("invalid user ID: %w", err)

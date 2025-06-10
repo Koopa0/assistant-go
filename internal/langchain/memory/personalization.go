@@ -9,13 +9,14 @@ import (
 
 	"github.com/koopa0/assistant-go/internal/config"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres/sqlc"
 )
 
 // PersonalizationMemory implements persistent storage for user preferences and contextual information
 type PersonalizationMemory struct {
-	dbClient *postgres.SQLCClient
-	config   config.LangChain
-	logger   *slog.Logger
+	queries sqlc.Querier
+	config  config.LangChain
+	logger  *slog.Logger
 }
 
 // UserPreference represents a user preference or setting
@@ -47,18 +48,18 @@ type UserContext struct {
 }
 
 // NewPersonalizationMemory creates a new personalization memory instance
-func NewPersonalizationMemory(dbClient *postgres.SQLCClient, config config.LangChain, logger *slog.Logger) *PersonalizationMemory {
+func NewPersonalizationMemory(queries sqlc.Querier, config config.LangChain, logger *slog.Logger) *PersonalizationMemory {
 	return &PersonalizationMemory{
-		dbClient: dbClient,
-		config:   config,
-		logger:   logger,
+		queries: queries,
+		config:  config,
+		logger:  logger,
 	}
 }
 
 // Store stores a memory entry (preference or context) in personalization memory
 func (pm *PersonalizationMemory) Store(ctx context.Context, entry *MemoryEntry) error {
 	// Check if database client is available
-	if pm.dbClient == nil {
+	if pm.queries == nil {
 		pm.logger.Debug("No database client available for personalization memory storage",
 			slog.String("entry_id", entry.ID))
 		return nil // Gracefully handle missing database
@@ -121,14 +122,26 @@ func (pm *PersonalizationMemory) storePreference(ctx context.Context, entry *Mem
 		embedding = nil // Continue without embedding
 	}
 
-	_, err = pm.dbClient.CreateEmbedding(
-		ctx,
-		"personalization",
-		preference.ID,
-		content,
-		embedding,
-		metadata,
-	)
+	// Convert preference ID to UUID
+	prefUUID, err := postgres.ParseUUID(preference.ID)
+	if err != nil {
+		return fmt.Errorf("failed to parse preference ID: %w", err)
+	}
+
+	// Convert metadata to JSON
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	// Create embedding with queries
+	_, err = pm.queries.CreateEmbedding(ctx, sqlc.CreateEmbeddingParams{
+		ContentType: "personalization",
+		ContentID:   prefUUID,
+		ContentText: content,
+		Embedding:   postgres.VectorToPgVector(embedding),
+		Metadata:    metadataJSON,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to store preference: %w", err)
 	}
@@ -197,14 +210,26 @@ func (pm *PersonalizationMemory) storeContext(ctx context.Context, entry *Memory
 		embedding = nil // Continue without embedding
 	}
 
-	_, err = pm.dbClient.CreateEmbedding(
-		ctx,
-		"personalization",
-		userContext.ID,
-		content,
-		embedding,
-		metadata,
-	)
+	// Convert context ID to UUID
+	ctxUUID, err := postgres.ParseUUID(userContext.ID)
+	if err != nil {
+		return fmt.Errorf("failed to parse context ID: %w", err)
+	}
+
+	// Convert metadata to JSON
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	// Create embedding with queries
+	_, err = pm.queries.CreateEmbedding(ctx, sqlc.CreateEmbeddingParams{
+		ContentType: "personalization",
+		ContentID:   ctxUUID,
+		ContentText: content,
+		Embedding:   postgres.VectorToPgVector(embedding),
+		Metadata:    metadataJSON,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to store context: %w", err)
 	}
@@ -223,7 +248,7 @@ func (pm *PersonalizationMemory) Search(ctx context.Context, query *MemoryQuery)
 	results := make([]*MemorySearchResult, 0)
 
 	// Check if database client is available
-	if pm.dbClient == nil {
+	if pm.queries == nil {
 		pm.logger.Debug("No database client available for personalization memory search")
 		return results, nil // Return empty results gracefully
 	}
@@ -256,24 +281,38 @@ func (pm *PersonalizationMemory) Search(ctx context.Context, query *MemoryQuery)
 
 	// Search using semantic similarity if embedding available
 	if len(queryEmbedding) > 0 {
-		searchResults, err := pm.dbClient.SearchSimilarEmbeddings(
-			ctx,
-			queryEmbedding,
-			"personalization",
-			limit,
-			similarity,
-		)
+		// Search for similar embeddings
+		searchResults, err := pm.queries.SearchSimilarEmbeddings(ctx, sqlc.SearchSimilarEmbeddingsParams{
+			QueryEmbedding: postgres.VectorToPgVector(queryEmbedding),
+			ContentType:    "personalization",
+			Threshold:      similarity,
+			ResultLimit:    int32(limit),
+		})
 		if err != nil {
 			return nil, fmt.Errorf("failed to search personalization memory: %w", err)
 		}
 
-		// Convert results and apply additional filters
-		for _, result := range searchResults {
-			// Parse metadata to reconstruct memory entry
-			entry, err := pm.parseEmbeddingToMemoryEntry(result.Record)
+		// Convert results
+		for _, searchResult := range searchResults {
+			// Convert to standard Embedding type
+			emb := &sqlc.Embedding{
+				ID:          searchResult.ID,
+				ContentType: searchResult.ContentType,
+				ContentID:   searchResult.ContentID,
+				ContentText: searchResult.ContentText,
+				Embedding:   searchResult.Embedding,
+				Metadata:    searchResult.Metadata,
+				CreatedAt:   searchResult.CreatedAt,
+			}
+
+			// Convert to domain embedding record
+			embRecord := postgres.ConvertSQLCEmbedding(emb)
+
+			// Parse to memory entry
+			entry, err := pm.parseEmbeddingToMemoryEntry(embRecord)
 			if err != nil {
 				pm.logger.Warn("Failed to parse embedding result",
-					slog.String("embedding_id", result.Record.ID),
+					slog.String("embedding_id", searchResult.ID.String()),
 					slog.Any("error", err))
 				continue
 			}
@@ -283,17 +322,27 @@ func (pm *PersonalizationMemory) Search(ctx context.Context, query *MemoryQuery)
 				continue
 			}
 
+			// Convert similarity from int32 to float64
+			similarityFloat := float64(searchResult.Similarity) / 100.0
+
 			// Calculate relevance
-			relevance := pm.calculateRelevance(entry, query, result.Similarity)
+			relevance := pm.calculateRelevance(entry, query, similarityFloat)
 
 			memoryResult := &MemorySearchResult{
 				Entry:      entry,
-				Similarity: result.Similarity,
+				Similarity: similarityFloat,
 				Relevance:  relevance,
 			}
 
 			results = append(results, memoryResult)
 		}
+
+		pm.logger.Debug("Personalization memory search completed",
+			slog.String("user_id", query.UserID),
+			slog.Int("results", len(results)),
+			slog.Float64("similarity_threshold", similarity))
+
+		return results, nil
 	}
 
 	pm.logger.Debug("Personalization memory search completed",
@@ -384,8 +433,27 @@ func (pm *PersonalizationMemory) Update(ctx context.Context, entry *MemoryEntry)
 
 // Delete deletes a memory entry
 func (pm *PersonalizationMemory) Delete(ctx context.Context, entryID string) error {
-	// TODO: Implement deletion from embedding store
-	// For now, just log the operation
+	// Check if database client is available
+	if pm.queries == nil {
+		pm.logger.Debug("No database client available for deletion")
+		return nil
+	}
+
+	// Convert entry ID to UUID
+	entryUUID, err := postgres.ParseUUID(entryID)
+	if err != nil {
+		return fmt.Errorf("failed to parse entry ID: %w", err)
+	}
+
+	// Delete by content type and content ID
+	err = pm.queries.DeleteEmbedding(ctx, sqlc.DeleteEmbeddingParams{
+		ContentType: "personalization",
+		ContentID:   entryUUID,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete personalization entry: %w", err)
+	}
+
 	pm.logger.Debug("Deleted personalization entry",
 		slog.String("id", entryID))
 
@@ -394,26 +462,73 @@ func (pm *PersonalizationMemory) Delete(ctx context.Context, entryID string) err
 
 // Clear clears personalization data for a user
 func (pm *PersonalizationMemory) Clear(ctx context.Context, userID string, olderThan *time.Time) error {
+	// Check if database client is available
+	if pm.queries == nil {
+		pm.logger.Debug("No database client available for clearing memories")
+		return nil
+	}
+
 	pm.logger.Info("Personalization memory clear requested",
 		slog.String("user_id", userID),
 		slog.Any("older_than", olderThan))
 
-	// TODO: Implement bulk deletion by user ID and timestamp
+	// If olderThan is specified, delete expired embeddings
+	if olderThan != nil {
+		err := pm.queries.DeleteExpiredEmbeddings(ctx, sqlc.DeleteExpiredEmbeddingsParams{
+			CreatedAt: *olderThan,
+			Column2:   "personalization", // content_type parameter
+		})
+		if err != nil {
+			return fmt.Errorf("failed to delete expired personalization data: %w", err)
+		}
+	} else {
+		// Delete all personalization data for the user
+		metadataFilter := map[string]interface{}{
+			"user_id": userID,
+		}
+		metadataJSON, err := json.Marshal(metadataFilter)
+		if err != nil {
+			return fmt.Errorf("failed to create metadata filter: %w", err)
+		}
+
+		err = pm.queries.DeleteEmbeddingsByMetadata(ctx, metadataJSON)
+		if err != nil {
+			return fmt.Errorf("failed to delete user personalization data: %w", err)
+		}
+	}
+
 	return nil
 }
 
 // GetStats returns statistics for personalization memory
 func (pm *PersonalizationMemory) GetStats(ctx context.Context, userID string) (*MemoryTypeStats, error) {
-	stats := &MemoryTypeStats{
-		EntryCount:        0,
-		TotalSize:         0,
-		AverageImportance: 0,
+	// Check if database client is available
+	if pm.queries == nil {
+		return &MemoryTypeStats{
+			EntryCount:        0,
+			TotalSize:         0,
+			AverageImportance: 0,
+		}, nil
 	}
 
 	pm.logger.Debug("Personalization memory stats requested",
 		slog.String("user_id", userID))
 
-	// TODO: Implement proper stats collection
+	// Get count of personalization embeddings
+	count, err := pm.queries.CountEmbeddingsByType(ctx, "personalization")
+	if err != nil {
+		pm.logger.Warn("Failed to get personalization count",
+			slog.Any("error", err))
+		count = 0
+	}
+
+	// Basic stats
+	stats := &MemoryTypeStats{
+		EntryCount:        int(count),
+		TotalSize:         int64(count) * 1536 * 4, // Approximate size
+		AverageImportance: 0.7,                     // Higher importance for personalization
+	}
+
 	return stats, nil
 }
 
@@ -421,7 +536,25 @@ func (pm *PersonalizationMemory) GetStats(ctx context.Context, userID string) (*
 func (pm *PersonalizationMemory) Cleanup(ctx context.Context) error {
 	pm.logger.Info("Personalization memory cleanup started")
 
-	// TODO: Implement cleanup based on expiration dates
+	// Check if database client is available
+	if pm.queries == nil {
+		pm.logger.Debug("No database client available for cleanup")
+		return nil
+	}
+
+	// Delete personalization data older than 6 months
+	expirationDate := time.Now().AddDate(0, -6, 0)
+	err := pm.queries.DeleteExpiredEmbeddings(ctx, sqlc.DeleteExpiredEmbeddingsParams{
+		CreatedAt: expirationDate,
+		Column2:   "personalization", // content_type parameter
+	})
+	if err != nil {
+		return fmt.Errorf("failed to cleanup expired personalization data: %w", err)
+	}
+
+	pm.logger.Info("Personalization memory cleanup completed",
+		slog.Time("older_than", expirationDate))
+
 	return nil
 }
 

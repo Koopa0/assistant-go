@@ -2,6 +2,7 @@ package vectorstore
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 
@@ -10,11 +11,12 @@ import (
 	"github.com/tmc/langchaingo/vectorstores"
 
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres/sqlc"
 )
 
 // PGVectorStore implements LangChain's VectorStore interface using PostgreSQL with pgvector
 type PGVectorStore struct {
-	dbClient   *postgres.SQLCClient
+	queries    sqlc.Querier
 	embedder   embeddings.Embedder
 	logger     *slog.Logger
 	collection string
@@ -22,9 +24,9 @@ type PGVectorStore struct {
 }
 
 // NewPGVectorStore creates a new PGVector store
-func NewPGVectorStore(dbClient *postgres.SQLCClient, embedder embeddings.Embedder, logger *slog.Logger) *PGVectorStore {
+func NewPGVectorStore(queries sqlc.Querier, embedder embeddings.Embedder, logger *slog.Logger) *PGVectorStore {
 	return &PGVectorStore{
-		dbClient:   dbClient,
+		queries:    queries,
 		embedder:   embedder,
 		logger:     logger,
 		collection: "langchain_documents",
@@ -83,15 +85,26 @@ func (vs *PGVectorStore) AddDocuments(ctx context.Context, docs []schema.Documen
 			embeddingFloat64[j] = float64(v)
 		}
 
+		// Convert document ID to UUID
+		docUUID, err := postgres.ParseUUID(docID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse document ID: %w", err)
+		}
+
+		// Convert metadata to JSON
+		metadataJSON, err := json.Marshal(metadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal metadata: %w", err)
+		}
+
 		// Store in database
-		_, err = vs.dbClient.CreateEmbedding(
-			ctx,
-			vs.collection,
-			docID,
-			doc.PageContent,
-			embeddingFloat64,
-			metadata,
-		)
+		_, err = vs.queries.CreateEmbedding(ctx, sqlc.CreateEmbeddingParams{
+			ContentType: vs.collection,
+			ContentID:   docUUID,
+			ContentText: doc.PageContent,
+			Embedding:   postgres.VectorToPgVector(embeddingFloat64),
+			Metadata:    metadataJSON,
+		})
 		if err != nil {
 			vs.logger.Error("Failed to store document embedding",
 				slog.String("doc_id", docID),
@@ -144,35 +157,53 @@ func (vs *PGVectorStore) SimilaritySearch(ctx context.Context, query string, num
 		}
 	}
 
-	// Search similar embeddings
-	results, err := vs.dbClient.SearchSimilarEmbeddings(
-		ctx,
-		queryEmbeddingFloat64,
-		vs.collection,
-		numDocuments,
-		similarity,
-	)
+	// Perform vector similarity search
+	threshold := float64(0.7) // Default threshold
+	if similarity > 0 {
+		threshold = float64(similarity)
+	}
+
+	searchResults, err := vs.queries.SearchSimilarEmbeddings(ctx, sqlc.SearchSimilarEmbeddingsParams{
+		QueryEmbedding: postgres.VectorToPgVector(queryEmbeddingFloat64),
+		ContentType:    vs.collection,
+		Threshold:      threshold,
+		ResultLimit:    int32(numDocuments),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to search similar embeddings: %w", err)
 	}
 
 	// Convert results to schema.Document
-	documents := make([]schema.Document, 0, len(results))
-	for _, result := range results {
+	documents := make([]schema.Document, 0, len(searchResults))
+	for _, result := range searchResults {
+		// Convert to standard Embedding type for processing
+		emb := &sqlc.Embedding{
+			ID:          result.ID,
+			ContentType: result.ContentType,
+			ContentID:   result.ContentID,
+			ContentText: result.ContentText,
+			Embedding:   result.Embedding,
+			Metadata:    result.Metadata,
+			CreatedAt:   result.CreatedAt,
+		}
+
+		// Convert the embedding to domain type
+		embRecord := postgres.ConvertSQLCEmbedding(emb)
+
 		doc := schema.Document{
-			PageContent: result.Record.ContentText,
+			PageContent: embRecord.ContentText,
 			Metadata:    make(map[string]any),
 		}
 
 		// Copy metadata, excluding internal fields
-		for key, value := range result.Record.Metadata {
+		for key, value := range embRecord.Metadata {
 			if key != "page_content" && key != "collection" {
 				doc.Metadata[key] = value
 			}
 		}
 
-		// Add similarity score to metadata
-		doc.Metadata["similarity_score"] = result.Similarity
+		// Add similarity score from the search result
+		doc.Metadata["similarity_score"] = float64(result.Similarity) / 100.0
 
 		documents = append(documents, doc)
 	}

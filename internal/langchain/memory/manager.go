@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/koopa0/assistant-go/internal/config"
-	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres/sqlc"
 )
 
 // MemoryType represents different types of memory
@@ -71,25 +71,25 @@ type MemoryManager struct {
 	longTermMemory        *LongTermMemory
 	toolMemory            *ToolMemory
 	personalizationMemory *PersonalizationMemory
-	dbClient              *postgres.SQLCClient
+	queries               sqlc.Querier
 	config                config.LangChain
 	logger                *slog.Logger
 	mu                    sync.RWMutex
 }
 
 // NewMemoryManager creates a new memory manager
-func NewMemoryManager(dbClient *postgres.SQLCClient, config config.LangChain, logger *slog.Logger) *MemoryManager {
+func NewMemoryManager(queries sqlc.Querier, config config.LangChain, logger *slog.Logger) *MemoryManager {
 	manager := &MemoryManager{
-		dbClient: dbClient,
-		config:   config,
-		logger:   logger,
+		queries: queries,
+		config:  config,
+		logger:  logger,
 	}
 
 	// Initialize memory components
 	manager.shortTermMemory = NewShortTermMemory(config, logger)
-	manager.longTermMemory = NewLongTermMemory(dbClient, config, logger)
+	manager.longTermMemory = NewLongTermMemory(queries, config, logger)
 	manager.toolMemory = NewToolMemory(config, logger)
-	manager.personalizationMemory = NewPersonalizationMemory(dbClient, config, logger)
+	manager.personalizationMemory = NewPersonalizationMemory(queries, config, logger)
 
 	return manager
 }

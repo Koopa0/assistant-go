@@ -64,13 +64,13 @@ type AIUsageStats struct {
 	RequestsPerHour float64       `json:"requests_per_hour"`
 }
 
-// LangChainAdapter adapts LangChainClient to implement the ai.Provider interface
+// LangChainAdapter adapts Client to implement the ai.Provider interface
 type LangChainAdapter struct {
-	client *LangChainClient
+	client *Client
 }
 
-// NewLangChainAdapter creates a new adapter for LangChainClient
-func NewLangChainAdapter(client *LangChainClient) *LangChainAdapter {
+// NewLangChainAdapter creates a new adapter for Client
+func NewLangChainAdapter(client *Client) *LangChainAdapter {
 	return &LangChainAdapter{
 		client: client,
 	}

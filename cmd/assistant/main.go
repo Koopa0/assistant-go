@@ -18,6 +18,8 @@ import (
 	"github.com/koopa0/assistant-go/internal/platform/observability"
 	"github.com/koopa0/assistant-go/internal/platform/server"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres/sqlc"
+	"github.com/koopa0/assistant-go/internal/user"
 )
 
 const (
@@ -107,26 +109,33 @@ func main() {
 	// Initialize database connection
 	var db postgres.DB
 
-	// Check if we're in test/demo mode or quiet mode
-	if os.Getenv("ASSISTANT_DEMO_MODE") == "true" || cfg.Database.URL == "" || isQuietMode {
-		if !isQuietMode {
-			logger.Info("Running in demo mode without database")
-		}
-		db = postgres.NewMockClient(logger)
-	} else {
-		client, err := postgres.NewClient(ctx, cfg.Database)
-		if err != nil {
-			logger.Error("Failed to initialize database", slog.Any("error", err))
-			os.Exit(1)
-		}
-		db = client
-		defer client.Close()
+	// Debug: log database URL
+	logger.Debug("Database configuration",
+		slog.String("url", cfg.Database.URL),
+		slog.Bool("demo_mode_env", os.Getenv("ASSISTANT_DEMO_MODE") == "true"),
+		slog.Bool("url_empty", cfg.Database.URL == ""))
 
-		// Run database migrations
-		if err := client.Migrate(ctx); err != nil {
-			logger.Error("Failed to run database migrations", slog.Any("error", err))
-			os.Exit(1)
-		}
+	// Database connection is required
+	if cfg.Database.URL == "" {
+		logger.Error("Database URL is required. Please set DATABASE_URL environment variable")
+		logger.Info("Example: export DATABASE_URL=postgres://localhost:5432/assistant")
+		os.Exit(1)
+	}
+
+	client, err := postgres.NewClient(ctx, cfg.Database)
+	if err != nil {
+		logger.Error("Failed to initialize database", slog.Any("error", err))
+		logger.Info("Please ensure PostgreSQL is running and the database exists")
+		logger.Info("Create database: createdb assistant")
+		os.Exit(1)
+	}
+	db = client
+	defer client.Close()
+
+	// Run database migrations
+	if err := client.Migrate(ctx); err != nil {
+		logger.Error("Failed to run database migrations", slog.Any("error", err))
+		os.Exit(1)
 	}
 
 	// Initialize performance profiling manager (golang_guide.md recommendation)
@@ -233,7 +242,21 @@ func runWebServer(ctx context.Context, cfg *config.Config, assistant *assistant.
 }
 
 func runCLI(ctx context.Context, cfg *config.Config, assistant *assistant.Assistant, logger *slog.Logger) {
-	cliApp, err := cli.New(cfg.CLI, assistant, logger)
+	// Get database queries for auth service
+	var sqlcQueries *sqlc.Queries
+	if db := assistant.GetDB(); db != nil {
+		sqlcQueries = db.GetQueries()
+	}
+
+	if sqlcQueries == nil {
+		logger.Error("Database not available for authentication")
+		os.Exit(1)
+	}
+
+	// Create auth service
+	authService := user.NewAuthService(sqlcQueries, logger, nil, cfg.Security.JWTSecret)
+
+	cliApp, err := cli.New(cfg.CLI, assistant, authService, logger)
 	if err != nil {
 		logger.Error("Failed to initialize CLI", slog.Any("error", err))
 		os.Exit(1)

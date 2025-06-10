@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/koopa0/assistant-go/internal/assistant"
 	"github.com/koopa0/assistant-go/internal/cli/ui"
 )
 
@@ -15,8 +16,19 @@ func (c *CLI) processQueryStream(ctx context.Context, query string) error {
 	fmt.Println(ui.Divider())
 	fmt.Println()
 
+	// Create a query request with authenticated user ID
+	if c.currentUser == nil {
+		ui.Error.Println("Please login first")
+		return fmt.Errorf("user not authenticated")
+	}
+
+	request := &assistant.QueryRequest{
+		Query:  query,
+		UserID: &c.currentUser.ID,
+	}
+
 	// Get streaming response from assistant
-	streamResp, err := c.assistant.ProcessQueryStream(ctx, query)
+	streamResp, err := c.assistant.ProcessQueryStreamEnhanced(ctx, request)
 	if err != nil {
 		ui.Error.Printf("Failed to start streaming: %v\n", err)
 		return err

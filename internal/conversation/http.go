@@ -8,6 +8,7 @@ import (
 
 	"github.com/koopa0/assistant-go/internal/platform/server/handlers"
 	"github.com/koopa0/assistant-go/internal/platform/server/middleware"
+	"github.com/koopa0/assistant-go/internal/user"
 )
 
 // HTTPHandler handles HTTP requests for conversations
@@ -51,9 +52,10 @@ func (h *HTTPHandler) HandleListConversations(w http.ResponseWriter, r *http.Req
 	ctx := r.Context()
 
 	// Get user ID from context (set by auth middleware)
-	userID, _ := ctx.Value("userID").(string)
+	userID := user.GetUserID(ctx)
 	if userID == "" {
-		userID = "demo_user" // For demo purposes
+		h.WriteUnauthorized(w, "Authentication required")
+		return
 	}
 
 	// Parse query parameters

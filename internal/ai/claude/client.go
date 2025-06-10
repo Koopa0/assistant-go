@@ -42,14 +42,14 @@ type GenerateRequest struct {
 
 // GenerateResponse represents a response from the AI provider
 type GenerateResponse struct {
-	Content      string                 `json:"content"`
-	Model        string                 `json:"model"`
-	Provider     string                 `json:"provider"`
-	TokensUsed   TokenUsage             `json:"tokens_used"`
-	FinishReason string                 `json:"finish_reason"`
-	ResponseTime time.Duration          `json:"response_time"`
-	RequestID    string                 `json:"request_id,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
+	Content      string         `json:"content"`
+	Model        string         `json:"model"`
+	Provider     string         `json:"provider"`
+	TokensUsed   TokenUsage     `json:"tokens_used"`
+	FinishReason string         `json:"finish_reason"`
+	ResponseTime time.Duration  `json:"response_time"`
+	RequestID    string         `json:"request_id,omitempty"`
+	Metadata     map[string]any `json:"metadata,omitempty"`
 }
 
 // TokenUsage represents token usage information

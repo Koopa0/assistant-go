@@ -12,11 +12,11 @@ import (
 // HTTPHandler handles HTTP requests for user operations
 type HTTPHandler struct {
 	*handlers.Handler
-	service *UserService
+	service *Service
 }
 
 // NewHTTPHandler creates a new HTTP handler for users
-func NewHTTPHandler(service *UserService, logger *slog.Logger) *HTTPHandler {
+func NewHTTPHandler(service *Service, logger *slog.Logger) *HTTPHandler {
 	loggerWithName := observability.ServerLogger(logger, "users_http")
 	return &HTTPHandler{
 		Handler: handlers.NewHandler(loggerWithName),

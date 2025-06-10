@@ -3,6 +3,7 @@ package chat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/koopa0/assistant-go/internal/assistant"
 	"github.com/koopa0/assistant-go/internal/conversation"
 	"github.com/koopa0/assistant-go/internal/platform/observability"
+	"github.com/koopa0/assistant-go/internal/user"
 )
 
 // ChatService handles chat completion and conversation logic
@@ -104,7 +106,10 @@ func (s *ChatService) ProcessChatCompletion(ctx context.Context, req *ChatComple
 	}
 
 	// Create assistant query request
-	userID := "api_user" // TODO: Get from authentication context
+	userID := user.GetUserID(ctx)
+	if userID == "" {
+		return nil, errors.New("no authenticated user")
+	}
 	queryReq := &assistant.QueryRequest{
 		Query:          userQuery,
 		UserID:         &userID,
@@ -152,7 +157,7 @@ func (s *ChatService) ProcessChatCompletion(ctx context.Context, req *ChatComple
 // ListConversations returns a list of conversations
 func (s *ChatService) ListConversations(ctx context.Context, userID string, limit, offset int) ([]*conversation.Conversation, error) {
 	if userID == "" {
-		userID = "api_user"
+		return nil, errors.New("user ID is required")
 	}
 
 	conversations, err := s.assistant.ListConversations(ctx, userID, limit, offset)
@@ -176,7 +181,7 @@ func (s *ChatService) GetConversation(ctx context.Context, conversationID string
 // GetWorkingMemory retrieves working memory content
 func (s *ChatService) GetWorkingMemory(ctx context.Context, userID string) (map[string]interface{}, error) {
 	if userID == "" {
-		userID = "api_user"
+		return nil, errors.New("user ID is required")
 	}
 
 	// TODO: Implement actual working memory retrieval
