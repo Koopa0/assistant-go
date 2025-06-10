@@ -79,20 +79,22 @@ type AIConfig struct {
 
 // Claude holds Claude-specific configuration
 type Claude struct {
-	APIKey      string  `yaml:"api_key" env:"CLAUDE_API_KEY"`
-	Model       string  `yaml:"model" env:"CLAUDE_MODEL" default:"claude-3-sonnet-20240229"`
-	MaxTokens   int     `yaml:"max_tokens" env:"CLAUDE_MAX_TOKENS" default:"4096"`
-	Temperature float64 `yaml:"temperature" env:"CLAUDE_TEMPERATURE" default:"0.7"`
-	BaseURL     string  `yaml:"base_url" env:"CLAUDE_BASE_URL" default:"https://api.anthropic.com"`
+	APIKey      string        `yaml:"api_key" env:"CLAUDE_API_KEY"`
+	Model       string        `yaml:"model" env:"CLAUDE_MODEL" default:"claude-3-sonnet-20240229"`
+	MaxTokens   int           `yaml:"max_tokens" env:"CLAUDE_MAX_TOKENS" default:"4096"`
+	Temperature float64       `yaml:"temperature" env:"CLAUDE_TEMPERATURE" default:"0.7"`
+	BaseURL     string        `yaml:"base_url" env:"CLAUDE_BASE_URL" default:"https://api.anthropic.com"`
+	Timeout     time.Duration `yaml:"timeout" env:"CLAUDE_TIMEOUT" default:"30s"`
 }
 
 // Gemini holds Gemini-specific configuration
 type Gemini struct {
-	APIKey      string  `yaml:"api_key" env:"GEMINI_API_KEY"`
-	Model       string  `yaml:"model" env:"GEMINI_MODEL" default:"gemini-pro"`
-	MaxTokens   int     `yaml:"max_tokens" env:"GEMINI_MAX_TOKENS" default:"4096"`
-	Temperature float64 `yaml:"temperature" env:"GEMINI_TEMPERATURE" default:"0.7"`
-	BaseURL     string  `yaml:"base_url" env:"GEMINI_BASE_URL" default:"https://generativelanguage.googleapis.com"`
+	APIKey      string        `yaml:"api_key" env:"GEMINI_API_KEY"`
+	Model       string        `yaml:"model" env:"GEMINI_MODEL" default:"gemini-pro"`
+	MaxTokens   int           `yaml:"max_tokens" env:"GEMINI_MAX_TOKENS" default:"4096"`
+	Temperature float64       `yaml:"temperature" env:"GEMINI_TEMPERATURE" default:"0.7"`
+	BaseURL     string        `yaml:"base_url" env:"GEMINI_BASE_URL" default:"https://generativelanguage.googleapis.com"`
+	Timeout     time.Duration `yaml:"timeout" env:"GEMINI_TIMEOUT" default:"30s"`
 }
 
 // Embedding holds embedding service configuration

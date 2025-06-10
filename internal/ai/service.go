@@ -49,7 +49,7 @@ func NewService(cfg *config.Config, logger *slog.Logger) (*Service, error) {
 			Model:       cfg.AI.Claude.Model,
 			MaxTokens:   cfg.AI.Claude.MaxTokens,
 			Temperature: cfg.AI.Claude.Temperature,
-			Timeout:     30 * time.Second,
+			Timeout:     cfg.AI.Claude.Timeout,
 		}
 
 		claudeClient, err := claude.NewClient(claudeConfig, logger)
@@ -68,7 +68,7 @@ func NewService(cfg *config.Config, logger *slog.Logger) (*Service, error) {
 			Model:       cfg.AI.Gemini.Model,
 			MaxTokens:   cfg.AI.Gemini.MaxTokens,
 			Temperature: cfg.AI.Gemini.Temperature,
-			Timeout:     30 * time.Second,
+			Timeout:     cfg.AI.Gemini.Timeout,
 		}
 
 		geminiClient, err := gemini.NewClient(geminiConfig, logger)
