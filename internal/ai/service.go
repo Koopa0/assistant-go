@@ -488,7 +488,7 @@ func (s *Service) ProcessEnhancedQuery(ctx context.Context, userQuery string, pr
 	}
 
 	// Generate response using AI service
-	response, err := s.GenerateResponse(ctx, request, providerName...)
+	response, err := s.GenerateResponse(ctx, request, providerName)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate AI response: %w", err)
 	}
