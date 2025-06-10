@@ -15,11 +15,14 @@ import (
 	"github.com/koopa0/assistant-go/internal/config"
 )
 
+// Static assertion to ensure *Service implements AIService
+var _ AIService = (*Service)(nil)
+
 // Service provides a unified AI service using direct dependencies
 // Uses concrete clients instead of interfaces for simplicity
 type Service struct {
-	claudeClient    *claude.Client
-	geminiClient    *gemini.Client
+	claudeClient    ClaudeProviderClient
+	geminiClient    GeminiProviderClient
 	promptService   *prompt.PromptService
 	defaultProvider string
 	logger          *slog.Logger
@@ -52,11 +55,11 @@ func NewService(cfg *config.Config, logger *slog.Logger) (*Service, error) {
 			Timeout:     30 * time.Second,
 		}
 
-		claudeClient, err := claude.NewClient(claudeConfig, logger)
+		concreteClaudeClient, err := claude.NewClient(claudeConfig, logger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Claude client: %w", err)
 		}
-		svc.claudeClient = claudeClient
+		svc.claudeClient = concreteClaudeClient
 		logger.Info("Claude client initialized")
 	}
 
@@ -71,11 +74,11 @@ func NewService(cfg *config.Config, logger *slog.Logger) (*Service, error) {
 			Timeout:     30 * time.Second,
 		}
 
-		geminiClient, err := gemini.NewClient(geminiConfig, logger)
+		concreteGeminiClient, err := gemini.NewClient(geminiConfig, logger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 		}
-		svc.geminiClient = geminiClient
+		svc.geminiClient = concreteGeminiClient
 		logger.Info("Gemini client initialized")
 	}
 

@@ -12,7 +12,7 @@ import (
 	"github.com/koopa0/assistant-go/internal/conversation"
 	"github.com/koopa0/assistant-go/internal/langchain"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
-	"github.com/koopa0/assistant-go/internal/tool"
+	"github.com/koopa0/assistant-go/internal/tool" // Ensured
 	"github.com/koopa0/assistant-go/internal/tool/docker"
 	"github.com/koopa0/assistant-go/internal/tool/godev"
 	postgrestool "github.com/koopa0/assistant-go/internal/tool/postgres"
@@ -35,7 +35,7 @@ type Assistant struct {
 	config           *config.Config                   // Application configuration
 	db               postgres.DB                      // Database client for persistence
 	logger           *slog.Logger                     // Structured logger
-	registry         *tool.Registry                   // Tool registry for available tools
+	registry         tool.RegistryService             // <<< CHANGED TYPE HERE
 	processor        *Processor                       // Request processing pipeline
 	conversationMgr  conversation.ConversationService // Conversation service
 	langchainService *langchain.Service               // LangChain integration service

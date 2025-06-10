@@ -15,7 +15,7 @@ import (
 	"github.com/koopa0/assistant-go/internal/conversation"
 	converrors "github.com/koopa0/assistant-go/internal/conversation"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
-	"github.com/koopa0/assistant-go/internal/tool"
+	"github.com/koopa0/assistant-go/internal/tool" // For tool.RegistryService
 	userserrors "github.com/koopa0/assistant-go/internal/user"
 )
 
@@ -32,22 +32,22 @@ import (
 type Processor struct {
 	config          *config.Config
 	db              postgres.DB
-	registry        *tool.Registry
+	registry        tool.RegistryService // Changed type
 	logger          *slog.Logger
 	conversationMgr conversation.ConversationService
-	aiService       *ai.Service
+	aiService       ai.AIService // Changed type
 	envDetector     *EnvironmentDetector
 }
 
 // NewProcessor creates a new processor with enhanced error handling
-func NewProcessor(cfg *config.Config, db postgres.DB, registry *tool.Registry, logger *slog.Logger) (*Processor, error) {
+func NewProcessor(cfg *config.Config, db postgres.DB, registry tool.RegistryService, logger *slog.Logger) (*Processor, error) { // Changed registry type
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
 	if db == nil {
 		return nil, fmt.Errorf("database is required")
 	}
-	if registry == nil {
+	if registry == nil { // Still check for nil, even if it's an interface
 		return nil, fmt.Errorf("tool_registry is required")
 	}
 	if logger == nil {
@@ -57,7 +57,7 @@ func NewProcessor(cfg *config.Config, db postgres.DB, registry *tool.Registry, l
 	conversationMgr := conversation.NewConversationSystem(db.GetQueries(), logger)
 
 	// Initialize AI service
-	aiService, err := ai.NewService(cfg, logger)
+	concreteAIService, err := ai.NewService(cfg, logger) // concreteAIService is *ai.Service
 	if err != nil {
 		return nil, NewAssistantInitializationError("ai_service", err)
 	}
@@ -65,10 +65,10 @@ func NewProcessor(cfg *config.Config, db postgres.DB, registry *tool.Registry, l
 	return &Processor{
 		config:          cfg,
 		db:              db,
-		registry:        registry,
+		registry:        registry, // registry is now tool.RegistryService
 		logger:          logger,
 		conversationMgr: conversationMgr,
-		aiService:       aiService,
+		aiService:       concreteAIService, // Assign *ai.Service to ai.AIService field
 		envDetector:     NewEnvironmentDetector(),
 	}, nil
 }
@@ -1100,14 +1100,6 @@ func (p *Processor) analyzeQueryContext(ctx context.Context, request *QueryReque
 }
 
 // Helper functions
-func getMapKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
 func containsAny(text string, keywords []string) bool {
 	textLower := strings.ToLower(text)
 	for _, keyword := range keywords {

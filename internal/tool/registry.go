@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+var _ RegistryService = (*Registry)(nil)
+
 // Tool represents a tool that can be executed by the assistant
 type Tool interface {
 	// Name returns the tool name
