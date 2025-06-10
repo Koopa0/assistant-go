@@ -78,7 +78,8 @@ func (s *Service) Store(ctx context.Context, entry Entry) error {
 		return s.working.Store(entry)
 	}
 
-	// Other types go to database
+	// For non-working memory types, this operation involves a single
+	// database write and is thus atomic at the database level.
 	_, err := s.createInDB(ctx, &entry)
 	return err
 }
@@ -151,7 +152,8 @@ func (s *Service) Update(ctx context.Context, entry Entry) error {
 		return s.working.Update(entry)
 	}
 
-	// Database updates
+	// For non-working memory types, this update involves a single
+	// database write and is atomic at the database level.
 	_, err := s.updateInDB(ctx, &entry)
 	return err
 }
@@ -239,6 +241,9 @@ func (s *Service) getFromDB(ctx context.Context, id string) (*Entry, error) {
 	}
 
 	// Increment access count asynchronously
+	// Incrementing the access count is done asynchronously as a best-effort
+	// operation and is not part of a transaction with the read.
+	// This prioritizes read performance over strict transactional consistency for the counter.
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

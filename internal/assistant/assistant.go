@@ -143,7 +143,8 @@ func New(ctx context.Context, cfg *config.Config, db postgres.DB, logger *slog.L
 	registry := tool.NewRegistry(logger)
 
 	// Initialize conversation service using factory function
-	conversationMgr := conversation.NewConversationSystem(db.GetQueries(), logger)
+	// Pass the db instance (postgres.DB) directly, as NewConversationSystem now expects postgres.DB
+	conversationMgr := conversation.NewConversationSystem(db, logger)
 
 	// Initialize processor
 	processor, err := NewProcessor(cfg, db, registry, logger)

@@ -217,7 +217,10 @@ func (s *AuthService) Register(ctx context.Context, email, password, name string
 		return "", fmt.Errorf("failed to marshal preferences: %w", err)
 	}
 
-	// Create user in database
+	// The check for existing user (GetUserByEmail) and user creation (CreateUser)
+	// are done as separate operations. While there's a theoretical race condition window,
+	// the database's unique constraint on the email field provides the ultimate data consistency
+	// by preventing duplicate email registrations. One of the concurrent create operations would fail.
 	user, err := s.queries.CreateUser(ctx, sqlc.CreateUserParams{
 		Username:     username,
 		Email:        email,
