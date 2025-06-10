@@ -22,16 +22,17 @@ import (
 type Service struct {
 	queries sqlc.Querier
 	logger  *slog.Logger
-	working *WorkingMemory
+	working WorkingMemoryInterface // Changed type
 	mu      sync.RWMutex
 }
 
-// NewService creates a new memory service
-func NewService(queries sqlc.Querier, logger *slog.Logger) *Service {
+// NewService creates a new core memory service.
+// It requires a Querier for database access and a WorkingMemoryInterface for in-memory operations.
+func NewService(queries sqlc.Querier, logger *slog.Logger, workingMem WorkingMemoryInterface) *Service { // Added workingMem parameter
 	return &Service{
 		queries: queries,
 		logger:  logger,
-		working: NewWorkingMemory(100),
+		working: workingMem, // Assign injected working memory
 	}
 }
 
@@ -77,7 +78,8 @@ func (s *Service) Store(ctx context.Context, entry Entry) error {
 		return s.working.Store(entry)
 	}
 
-	// Other types go to database
+	// For non-working memory types, this operation involves a single
+	// database write and is thus atomic at the database level.
 	_, err := s.createInDB(ctx, &entry)
 	return err
 }
@@ -150,7 +152,8 @@ func (s *Service) Update(ctx context.Context, entry Entry) error {
 		return s.working.Update(entry)
 	}
 
-	// Database updates
+	// For non-working memory types, this update involves a single
+	// database write and is atomic at the database level.
 	_, err := s.updateInDB(ctx, &entry)
 	return err
 }
@@ -173,7 +176,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 }
 
 // GetWorkingMemory returns the working memory instance for direct access
-func (s *Service) GetWorkingMemory() *WorkingMemory {
+func (s *Service) GetWorkingMemory() WorkingMemoryInterface { // Changed return type
 	return s.working
 }
 
@@ -238,6 +241,9 @@ func (s *Service) getFromDB(ctx context.Context, id string) (*Entry, error) {
 	}
 
 	// Increment access count asynchronously
+	// Incrementing the access count is done asynchronously as a best-effort
+	// operation and is not part of a transaction with the read.
+	// This prioritizes read performance over strict transactional consistency for the counter.
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()

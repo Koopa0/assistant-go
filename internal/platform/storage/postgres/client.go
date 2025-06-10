@@ -137,17 +137,20 @@ func (c *Client) BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, 
 	return c.pool.BeginTx(ctx, txOptions)
 }
 
-// Query executes a query that returns rows
+// Query executes a query that returns rows.
+// It directly returns errors from the underlying pgxpool.Pool.
 func (c *Client) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	return c.pool.Query(ctx, sql, args...)
 }
 
-// QueryRow executes a query that returns at most one row
+// QueryRow executes a query that returns at most one row.
+// It directly returns errors from the underlying pgxpool.Pool.
 func (c *Client) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	return c.pool.QueryRow(ctx, sql, args...)
 }
 
-// Exec executes a query that doesn't return rows
+// Exec executes a query that doesn't return rows.
+// It directly returns errors from the underlying pgxpool.Pool.
 func (c *Client) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	return c.pool.Exec(ctx, sql, args...)
 }
@@ -176,12 +179,14 @@ func (c *Client) WithTransaction(ctx context.Context, fn func(pgx.Tx) error) err
 	}()
 
 	if err := fn(tx); err != nil {
+		// Attempt to rollback the transaction if the provided function fails.
+		// Log any error during rollback but return the original function's error.
 		if rbErr := tx.Rollback(ctx); rbErr != nil {
 			c.logger.Error("Failed to rollback transaction",
 				slog.Any("rollback_error", rbErr),
-				slog.Any("original_error", err))
+				slog.Any("original_error", err)) // Log original error for context
 		}
-		return err
+		return err // Return the original error from fn(tx)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -205,12 +210,14 @@ func (c *Client) WithTransactionTx(ctx context.Context, txOptions pgx.TxOptions,
 	}()
 
 	if err := fn(tx); err != nil {
+		// Attempt to rollback the transaction if the provided function fails.
+		// Log any error during rollback but return the original function's error.
 		if rbErr := tx.Rollback(ctx); rbErr != nil {
 			c.logger.Error("Failed to rollback transaction",
 				slog.Any("rollback_error", rbErr),
-				slog.Any("original_error", err))
+				slog.Any("original_error", err)) // Log original error for context
 		}
-		return err
+		return err // Return the original error from fn(tx)
 	}
 
 	if err := tx.Commit(ctx); err != nil {

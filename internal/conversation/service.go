@@ -16,24 +16,27 @@ import (
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres/sqlc"
 )
 
+	"github.com/koopa0/assistant-go/internal/platform/storage/postgres" // Added for postgres.DB
+)
+
 // Service handles all conversation-related operations
 // Merges the functionality of Repository and Manager into a single service
 type Service struct {
-	queries sqlc.Querier
+	db      postgres.DB // Changed from sqlc.Querier to postgres.DB for transaction support
 	logger  *slog.Logger
 }
 
 // NewService creates a new conversation service
-func NewService(queries sqlc.Querier, logger *slog.Logger) *Service {
+func NewService(db postgres.DB, logger *slog.Logger) *Service { // Parameter changed
 	return &Service{
-		queries: queries,
+		db:      db,
 		logger:  logger,
 	}
 }
 
 // NewConversationSystem creates a new conversation service (backward compatibility)
-func NewConversationSystem(queries sqlc.Querier, logger *slog.Logger) *Service {
-	return NewService(queries, logger)
+func NewConversationSystem(db postgres.DB, logger *slog.Logger) *Service { // Parameter changed
+	return NewService(db, logger)
 }
 
 // CreateConversation creates a new conversation with business logic and database operations
@@ -74,7 +77,7 @@ func (s *Service) CreateConversation(ctx context.Context, userID, title string) 
 	}
 
 	// Execute query
-	row, err := s.queries.CreateConversation(ctx, params)
+	row, err := s.db.GetQueries().CreateConversation(ctx, params) // Use s.db.GetQueries()
 	if err != nil {
 		return nil, fmt.Errorf("create conversation: %w", err)
 	}
@@ -106,7 +109,7 @@ func (s *Service) GetConversation(ctx context.Context, conversationID string) (*
 	}
 
 	// Execute query
-	row, err := s.queries.GetConversation(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	row, err := s.db.GetQueries().GetConversation(ctx, pgtype.UUID{Bytes: id, Valid: true}) // Use s.db.GetQueries()
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, ConversationNotFoundError{ConversationID: conversationID}
@@ -131,12 +134,16 @@ func (s *Service) ListConversations(ctx context.Context, userID string) ([]*Conv
 	}
 
 	// Execute query
-	rows, err := s.queries.GetConversationsByUser(ctx, pgtype.UUID{Bytes: uid, Valid: true})
+	rows, err := s.db.GetQueries().GetConversationsByUser(ctx, pgtype.UUID{Bytes: uid, Valid: true}) // Use s.db.GetQueries()
+	rows, err := s.db.GetQueries().GetConversationsByUser(ctx, pgtype.UUID{Bytes: uid, Valid: true}) // Use s.db.GetQueries()
 	if err != nil {
 		return nil, fmt.Errorf("list conversations: %w", err)
 	}
 
-	// Convert all rows and filter active conversations
+	// Convert all rows and filter active conversations.
+	// If an individual conversation entry fails to convert (e.g., due to malformed metadata),
+	// the error is logged, and that specific entry is skipped. The operation
+	// will still return a list of successfully converted conversations.
 	conversations := make([]*Conversation, 0)
 	for _, row := range rows {
 		conv, err := s.toDomainConversation(row)
@@ -207,75 +214,94 @@ func (s *Service) AddMessage(ctx context.Context, conversationID, role, content 
 		return nil, fmt.Errorf("invalid role: %s", role)
 	}
 
-	// Validate conversation exists and is not archived
+	// The original GetConversation call is kept outside the transaction for now.
+	// If GetConversation itself needed to be part of the same transaction (e.g., for read-committed),
+	// it would also need to accept a Querier or pgx.Tx.
 	conv, err := s.GetConversation(ctx, conversationID)
 	if err != nil {
-		return nil, fmt.Errorf("get conversation: %w", err)
+		return nil, fmt.Errorf("get conversation for validation: %w", err)
 	}
-
 	if conv.IsArchived {
 		return nil, fmt.Errorf("cannot add message to archived conversation")
 	}
 
-	// Create message with initial metadata
-	msg := &Message{
-		ConversationID: conversationID,
-		Role:           role,
-		Content:        content,
-		Metadata:       MessageMetadata{}, // Will be populated by AI service
-	}
+	var createdMessage *Message
 
-	// Marshal metadata
-	metadataJSON, err := json.Marshal(msg.Metadata)
+	// Use a transaction to ensure atomicity of creating a message
+	// and updating the parent conversation's metadata.
+	err = s.db.WithTransaction(ctx, func(tx pgx.Tx) error {
+		qtx := s.db.GetQueries().WithTx(tx) // Get transaction-aware querier
+
+		// Create message with initial metadata
+		msg := &Message{
+			ConversationID: conversationID,
+			Role:           role,
+			Content:        content,
+			Metadata:       MessageMetadata{}, // Will be populated by AI service
+		}
+		metadataJSON, err := json.Marshal(msg.Metadata)
+		if err != nil {
+			return fmt.Errorf("marshal message metadata in tx: %w", err)
+		}
+		convUUID, err := uuid.Parse(conversationID)
+		if err != nil {
+			return fmt.Errorf("invalid conversation ID in tx: %w", err)
+		}
+		var tokenCount pgtype.Int4
+		if msg.TokenCount != nil {
+			tokenCount = pgtype.Int4{Int32: int32(*msg.TokenCount), Valid: true}
+		}
+		params := sqlc.CreateMessageParams{
+			ConversationID: pgtype.UUID{Bytes: convUUID, Valid: true},
+			Role:           msg.Role,
+			Content:        msg.Content,
+			Metadata:       metadataJSON,
+			TokenCount:     tokenCount,
+		}
+
+		// Execute CreateMessage query using transaction-aware querier (qtx)
+		row, err := qtx.CreateMessage(ctx, params)
+		if err != nil {
+			return fmt.Errorf("create message in tx: %w", err)
+		}
+		createdMsgInternal, err := s.toDomainMessageFromCreateRow(row)
+		if err != nil {
+			return fmt.Errorf("convert message in tx: %w", err)
+		}
+		createdMessage = createdMsgInternal // Assign to outer scope variable
+
+		// Update conversation metadata (in-memory part from the pre-transaction read)
+		// This uses the 'conv' object fetched before the transaction.
+		// If other transactions could modify 'conv' concurrently, this might lead to stale data.
+		// For higher consistency, 'conv' could be re-fetched (SELECT FOR UPDATE) within the transaction.
+		// However, for typical chat message additions, this level might be acceptable.
+		conv.Metadata.MessageCount++
+		conv.Metadata.LastActive = time.Now()
+
+		// Update conversation in DB using transaction-aware querier (qtx)
+		metadataJSONForUpdate, err := json.Marshal(conv.Metadata)
+		if err != nil {
+			return fmt.Errorf("marshal updated conv metadata in tx: %w", err)
+		}
+		// conv.ID is the same as conversationID, which was parsed into convUUID
+		updateParams := sqlc.UpdateConversationParams{
+			ID:       pgtype.UUID{Bytes: convUUID, Valid: true}, // Use convUUID from above
+			Title:    conv.Title,                               // Title might not change here, ensure it's correct
+			Metadata: metadataJSONForUpdate,
+		}
+		_, err = qtx.UpdateConversation(ctx, updateParams)
+		if err != nil {
+			return fmt.Errorf("update conversation metadata in tx: %w", err)
+		}
+		return nil // Commit transaction
+	})
+
 	if err != nil {
-		return nil, fmt.Errorf("marshal metadata: %w", err)
+		// Log the top-level transaction error. Specific errors inside were already wrapped.
+		s.logger.Error("Failed to add message with transaction", slog.String("conversation_id", conversationID), slog.Any("error", err))
+		return nil, err // Return the error from WithTransaction
 	}
-
-	// Parse conversation UUID
-	convUUID, err := uuid.Parse(conversationID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid conversation ID: %w", err)
-	}
-
-	// Prepare token count
-	var tokenCount pgtype.Int4
-	if msg.TokenCount != nil {
-		tokenCount = pgtype.Int4{Int32: int32(*msg.TokenCount), Valid: true}
-	}
-
-	params := sqlc.CreateMessageParams{
-		ConversationID: pgtype.UUID{Bytes: convUUID, Valid: true},
-		Role:           msg.Role,
-		Content:        msg.Content,
-		Metadata:       metadataJSON,
-		TokenCount:     tokenCount,
-	}
-
-	// Execute query
-	row, err := s.queries.CreateMessage(ctx, params)
-	if err != nil {
-		return nil, fmt.Errorf("create message: %w", err)
-	}
-
-	// Convert to domain type
-	created, err := s.toDomainMessageFromCreateRow(row)
-	if err != nil {
-		return nil, fmt.Errorf("convert message: %w", err)
-	}
-
-	// Update conversation metadata
-	conv.Metadata.MessageCount++
-	conv.Metadata.LastActive = time.Now()
-
-	// Update conversation
-	if err := s.UpdateConversation(ctx, conv); err != nil {
-		s.logger.Error("Failed to update conversation metadata",
-			slog.String("conversation_id", conversationID),
-			slog.Any("error", err))
-		// Don't fail the operation
-	}
-
-	return created, nil
+	return createdMessage, nil
 }
 
 // GetMessages retrieves all messages for a conversation
@@ -297,7 +323,7 @@ func (s *Service) GetMessages(ctx context.Context, conversationID string) ([]*Me
 	}
 
 	// Execute query
-	rows, err := s.queries.GetAllMessagesByConversation(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	rows, err := s.db.GetQueries().GetAllMessagesByConversation(ctx, pgtype.UUID{Bytes: id, Valid: true}) // Use s.db.GetQueries()
 	if err != nil {
 		return nil, fmt.Errorf("get messages: %w", err)
 	}
@@ -338,7 +364,7 @@ func (s *Service) UpdateConversation(ctx context.Context, conv *Conversation) er
 		Metadata: metadataJSON,
 	}
 
-	_, err = s.queries.UpdateConversation(ctx, params)
+	_, err = s.db.GetQueries().UpdateConversation(ctx, params) // Use s.db.GetQueries()
 	return err
 }
 
@@ -363,7 +389,7 @@ func (s *Service) ArchiveConversation(ctx context.Context, conversationID string
 		return fmt.Errorf("invalid conversation ID: %w", err)
 	}
 
-	err = s.queries.ArchiveConversation(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	err = s.db.GetQueries().ArchiveConversation(ctx, pgtype.UUID{Bytes: id, Valid: true}) // Use s.db.GetQueries()
 	if err != nil {
 		return fmt.Errorf("archive conversation: %w", err)
 	}
@@ -396,7 +422,7 @@ func (s *Service) DeleteConversation(ctx context.Context, conversationID string)
 		return fmt.Errorf("invalid conversation ID: %w", err)
 	}
 
-	err = s.queries.DeleteConversation(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	err = s.db.GetQueries().DeleteConversation(ctx, pgtype.UUID{Bytes: id, Valid: true}) // Use s.db.GetQueries()
 	if err != nil {
 		return fmt.Errorf("delete conversation: %w", err)
 	}

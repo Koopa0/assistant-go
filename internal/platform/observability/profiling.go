@@ -18,7 +18,7 @@ type ProfileManager struct {
 	logger   *slog.Logger
 	enabled  bool
 	interval time.Duration
-	mu       sync.RWMutex
+	mu       sync.RWMutex // mu protects access to 'enabled' and 'interval' fields.
 }
 
 // NewProfileManager creates a new profile manager
@@ -164,8 +164,21 @@ func (pm *ProfileManager) CollectTrace(ctx context.Context, duration time.Durati
 // StartPeriodicProfiling starts collecting profiles periodically in the background
 // This implements the golang_guide.md recommendation for continuous profiling
 func (pm *ProfileManager) StartPeriodicProfiling(ctx context.Context) {
+	// This goroutine periodically collects various performance profiles
+	// (CPU, memory, goroutine) if profiling is enabled.
+	// It listens for context cancellation via ctx.Done() for graceful shutdown.
+	// The ticker uses the 'pm.interval' value that was set when StartPeriodicProfiling
+	// was initially called or last configured via EnableProfiling before this goroutine started.
+	// Dynamic changes to 'pm.interval' after this point will not affect this running ticker.
 	go func() {
-		ticker := time.NewTicker(pm.interval)
+		// Read interval for the ticker.
+		// RLock is used to safely read pm.interval for NewTicker,
+		// ensuring consistency if EnableProfiling (which takes a WriteLock) is called concurrently.
+		pm.mu.RLock()
+		intervalForTicker := pm.interval
+		pm.mu.RUnlock()
+		ticker := time.NewTicker(intervalForTicker)
+
 		defer ticker.Stop()
 
 		for {
@@ -174,9 +187,13 @@ func (pm *ProfileManager) StartPeriodicProfiling(ctx context.Context) {
 				pm.logger.Info("Stopping periodic profiling")
 				return
 			case <-ticker.C:
+				// Check if profiling is enabled under a read lock before collecting.
 				pm.mu.RLock()
 				enabled := pm.enabled
+				// currentInterval := pm.interval // Read interval in case ticker needs to be reset (not done here)
 				pm.mu.RUnlock()
+				// Note: If currentInterval changed and ticker needs reset, logic would be more complex.
+				// Current design: ticker uses interval set at StartPeriodicProfiling or last EnableProfiling before start.
 
 				if !enabled {
 					continue

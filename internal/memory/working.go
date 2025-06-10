@@ -6,15 +6,20 @@ import (
 	"time"
 )
 
-// WorkingMemory provides fast, in-memory storage for active context
-// Using value semantics for entries to avoid pointer chasing
+// Static assertion to ensure *WorkingMemory implements WorkingMemoryInterface
+var _ WorkingMemoryInterface = (*WorkingMemory)(nil)
+
+// WorkingMemory provides fast, in-memory storage for active context,
+// such as recently accessed items or short-term scratchpad information.
+// It uses value semantics for entries internally to manage data copies.
 type WorkingMemory struct {
 	entries  map[string]WorkingMemoryEntry
 	capacity int
 	mu       sync.RWMutex
 }
 
-// NewWorkingMemory creates a new working memory instance
+// NewWorkingMemory creates a new working memory instance with a specified capacity.
+// If capacity is non-positive, DefaultMaxWorkingSize is used.
 func NewWorkingMemory(capacity int) *WorkingMemory {
 	if capacity <= 0 {
 		capacity = DefaultMaxWorkingSize

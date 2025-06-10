@@ -12,16 +12,18 @@ import (
 	"github.com/koopa0/assistant-go/internal/tool"
 )
 
-// GoDevTool implements the Tool interface for Go development functionality
+// GoDevTool provides capabilities for analyzing Go development workspaces.
+// It uses a DetectorService to gather information about the workspace.
 type GoDevTool struct {
-	detector *WorkspaceDetector
+	detector DetectorService // Changed type: Uses DetectorService interface
 	logger   *slog.Logger
 }
 
-// NewGoDevTool creates a new Go development tool
-func NewGoDevTool(logger *slog.Logger) *GoDevTool {
+// NewGoDevTool creates a new Go development tool, requiring a DetectorService
+// for workspace analysis and a logger.
+func NewGoDevTool(detector DetectorService, logger *slog.Logger) *GoDevTool { // Added detector parameter
 	return &GoDevTool{
-		detector: NewWorkspaceDetector(logger),
+		detector: detector, // Assign injected detector
 		logger:   logger,
 	}
 }
@@ -96,19 +98,15 @@ func (t *GoDevTool) Execute(ctx context.Context, input *tool.ToolInput) (*tool.T
 	// Marshal the parameters map to JSON first
 	paramsJSON, err := json.Marshal(input.Parameters)
 	if err != nil {
-		return &tool.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Failed to marshal parameters: %v", err),
-		}, nil
+		// Return actual error if parameter marshalling fails.
+		return nil, fmt.Errorf("failed to marshal tool parameters for godev: %w", err)
 	}
 
 	// Parse the input parameters
 	var goInput GoDevInput
 	if err := json.Unmarshal(paramsJSON, &goInput); err != nil {
-		return &tool.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Invalid input parameters: %v", err),
-		}, nil
+		// Return actual error if input unmarshalling fails.
+		return nil, fmt.Errorf("invalid input parameters for godev action '%s': %w", goInput.Action, err)
 	}
 	t.logger.Info("Executing Go development tool",
 		"action", goInput.Action,
@@ -122,32 +120,61 @@ func (t *GoDevTool) Execute(ctx context.Context, input *tool.ToolInput) (*tool.T
 	// Convert to absolute path
 	absPath, err := filepath.Abs(goInput.Path)
 	if err != nil {
-		return &tool.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Invalid path: %v", err),
-		}, nil
+		// Return actual error if path resolution fails.
+		return nil, fmt.Errorf("invalid path provided for godev: %w", err)
 	}
 
 	// Create analysis options
 	options := t.createAnalysisOptions(&goInput)
 
 	// Execute based on action
+	var res *tool.ToolResult
+	// var err error // already declared above for paramsJSON and absPath
+
 	switch goInput.Action {
 	case "analyze":
-		return t.executeAnalyze(ctx, absPath, options)
+		// Call specific action handler and propagate its result and error.
+		res, err = t.executeAnalyze(ctx, absPath, options)
+		if err != nil {
+			// Wrap error from analyze action for context.
+			return nil, fmt.Errorf("godev action 'analyze' failed: %w", err)
+		}
+		return res, nil
 	case "detect":
-		return t.executeDetect(ctx, absPath, options)
+		// Call specific action handler and propagate its result and error.
+		res, err = t.executeDetect(ctx, absPath, options)
+		if err != nil {
+			// Wrap error from detect action for context.
+			return nil, fmt.Errorf("godev action 'detect' failed: %w", err)
+		}
+		return res, nil
 	case "coverage":
-		return t.executeCoverage(ctx, absPath, options)
+		// Call specific action handler and propagate its result and error.
+		res, err = t.executeCoverage(ctx, absPath, options)
+		if err != nil {
+			// Wrap error from coverage action for context.
+			return nil, fmt.Errorf("godev action 'coverage' failed: %w", err)
+		}
+		return res, nil
 	case "dependencies":
-		return t.executeDependencies(ctx, absPath, options)
+		// Call specific action handler and propagate its result and error.
+		res, err = t.executeDependencies(ctx, absPath, options)
+		if err != nil {
+			// Wrap error from dependencies action for context.
+			return nil, fmt.Errorf("godev action 'dependencies' failed: %w", err)
+		}
+		return res, nil
 	case "metrics":
-		return t.executeMetrics(ctx, absPath, options)
+		// Call specific action handler and propagate its result and error.
+		res, err = t.executeMetrics(ctx, absPath, options)
+		if err != nil {
+			// Wrap error from metrics action for context.
+			return nil, fmt.Errorf("godev action 'metrics' failed: %w", err)
+		}
+		return res, nil
 	default:
-		return &tool.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Unknown action: %s", goInput.Action),
-		}, nil
+		// Return error for unknown action.
+		return nil, fmt.Errorf("godev: unknown action '%s'", goInput.Action)
 	}
 }
 
@@ -181,12 +208,10 @@ func (t *GoDevTool) createAnalysisOptions(input *GoDevInput) *AnalysisOptions {
 func (t *GoDevTool) executeAnalyze(ctx context.Context, path string, options *AnalysisOptions) (*tool.ToolResult, error) {
 	result, err := t.detector.DetectWorkspace(ctx, path, options)
 	if err != nil {
-		return &tool.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Analysis failed: %v", err),
-		}, nil
+		// Wrap and return error from workspace detector.
+		return nil, fmt.Errorf("analysis detection failed: %w", err)
 	}
-
+	// Construct ToolResult only on success.
 	return &tool.ToolResult{
 		Success: true,
 		Data: &tool.ToolResultData{
@@ -213,10 +238,8 @@ func (t *GoDevTool) executeDetect(ctx context.Context, path string, options *Ana
 
 	result, err := t.detector.DetectWorkspace(ctx, path, detectOptions)
 	if err != nil {
-		return &tool.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Detection failed: %v", err),
-		}, nil
+		// Wrap and return error from workspace detector.
+		return nil, fmt.Errorf("detection failed: %w", err)
 	}
 
 	// Return only workspace info for detection
@@ -248,17 +271,13 @@ func (t *GoDevTool) executeCoverage(ctx context.Context, path string, options *A
 
 	result, err := t.detector.DetectWorkspace(ctx, path, &coverageOptions)
 	if err != nil {
-		return &tool.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Coverage analysis failed: %v", err),
-		}, nil
+		// Wrap and return error from workspace detector.
+		return nil, fmt.Errorf("coverage analysis failed: %w", err)
 	}
 
 	if result.Workspace.TestCoverage == nil {
-		return &tool.ToolResult{
-			Success: false,
-			Error:   "No test coverage data available. Make sure you have tests in your project.",
-		}, nil
+		// Return error if test coverage data is unavailable after analysis.
+		return nil, fmt.Errorf("no test coverage data available in workspace at %s. Ensure tests exist and were run", path)
 	}
 
 	coverageResult := map[string]interface{}{
@@ -287,10 +306,8 @@ func (t *GoDevTool) executeCoverage(ctx context.Context, path string, options *A
 func (t *GoDevTool) executeDependencies(ctx context.Context, path string, options *AnalysisOptions) (*tool.ToolResult, error) {
 	result, err := t.detector.DetectWorkspace(ctx, path, options)
 	if err != nil {
-		return &tool.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Dependency analysis failed: %v", err),
-		}, nil
+		// Wrap and return error from workspace detector.
+		return nil, fmt.Errorf("dependency analysis detection failed: %w", err)
 	}
 
 	// Group dependencies by type
@@ -328,10 +345,8 @@ func (t *GoDevTool) executeDependencies(ctx context.Context, path string, option
 func (t *GoDevTool) executeMetrics(ctx context.Context, path string, options *AnalysisOptions) (*tool.ToolResult, error) {
 	result, err := t.detector.DetectWorkspace(ctx, path, options)
 	if err != nil {
-		return &tool.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Metrics calculation failed: %v", err),
-		}, nil
+		// Wrap and return error from workspace detector.
+		return nil, fmt.Errorf("metrics calculation detection failed: %w", err)
 	}
 
 	metricsResult := map[string]interface{}{
@@ -384,25 +399,22 @@ func (t *GoDevTool) Close(ctx context.Context) error {
 func (t *GoDevTool) ExecuteWithJSON(ctx context.Context, inputJSON string) (*tool.ToolResult, error) {
 	var input GoDevInput
 	if err := json.Unmarshal([]byte(inputJSON), &input); err != nil {
-		return &tool.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Invalid JSON input: %v", err),
-		}, nil
+		// Return actual error for invalid JSON input.
+		return nil, fmt.Errorf("invalid JSON input for godev: %w", err)
 	}
 
 	// Convert to map[string]interface{} for ToolInput
 	var paramsMap map[string]interface{}
 	if err := json.Unmarshal([]byte(inputJSON), &paramsMap); err != nil {
-		return &tool.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Failed to convert to parameters map: %v", err),
-		}, nil
+		// Return actual error if converting JSON to parameters map fails.
+		return nil, fmt.Errorf("failed to convert JSON to parameters map for godev: %w", err)
 	}
 
 	toolInput := &tool.ToolInput{
 		Parameters: paramsMap,
 	}
 
+	// Call main Execute method and return its result and error directly.
 	return t.Execute(ctx, toolInput)
 }
 

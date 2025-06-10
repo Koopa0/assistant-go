@@ -88,10 +88,8 @@ func (t *DockerTool) Execute(ctx context.Context, input *tool.ToolInput) (*tool.
 
 	action, ok := params["action"].(string)
 	if !ok {
-		return &tool.ToolResult{
-			Success: false,
-			Error:   "action parameter is required",
-		}, nil
+		// Return actual error if action parameter is missing or not a string.
+		return nil, fmt.Errorf("action parameter is required and must be a string for docker tool")
 	}
 
 	t.logger.Info("Executing Docker action",
@@ -116,35 +114,31 @@ func (t *DockerTool) Execute(ctx context.Context, input *tool.ToolInput) (*tool.
 	case "build_analyze":
 		result, err = t.analyzeBuild(ctx, params)
 	default:
-		return &tool.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("unknown action: %s", action),
-		}, nil
+		// Return error for unknown docker action.
+		return nil, fmt.Errorf("docker tool: unknown action '%s'", action)
 	}
 
+	// This 'err' is from the specific action like t.listContainers
 	if err != nil {
-		return &tool.ToolResult{
-			Success:       false,
-			Error:         err.Error(),
-			ExecutionTime: time.Since(startTime),
-		}, nil
+		// Wrap and propagate error from the specific docker action.
+		return nil, fmt.Errorf("docker action '%s' failed: %w", action, err)
 	}
 
 	// Convert result to map[string]interface{} for output
 	var outputMap map[string]interface{}
 	resultJSON, err := json.Marshal(result)
 	if err != nil {
-		return &tool.ToolResult{
-			Success:       false,
-			Error:         fmt.Sprintf("failed to marshal result: %v", err),
-			ExecutionTime: time.Since(startTime),
-		}, nil
+		// Wrap error if marshalling the successful action's result fails.
+		return nil, fmt.Errorf("failed to marshal result for docker action '%s': %w", action, err)
 	}
 
 	if err := json.Unmarshal(resultJSON, &outputMap); err != nil {
-		// If we can't unmarshal to map, return the result directly
+		// If unmarshalling to map fails, use the raw result.
+		// This is a graceful degradation; the tool execution itself was successful.
+		// Consider if this scenario should instead return an error if map structure is critical.
+		t.logger.Warn("Failed to unmarshal action result into map, using raw result", slog.String("action", action), slog.Any("error", err))
 		outputMap = map[string]interface{}{
-			"result": result,
+			"result": result, // result is the direct output from the action handler
 		}
 	}
 
@@ -154,7 +148,7 @@ func (t *DockerTool) Execute(ctx context.Context, input *tool.ToolInput) (*tool.
 			Output: outputMap,
 		},
 		ExecutionTime: time.Since(startTime),
-	}, nil
+	}, nil // Explicitly nil error for success
 }
 
 // listContainers lists all Docker containers

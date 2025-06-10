@@ -9,7 +9,13 @@ import (
 	"time"
 )
 
-// EventBus is the central event management system
+// Static assertions to ensure *EventBus implements the defined interfaces.
+var _ EventPublisher = (*EventBus)(nil)
+var _ EventBusService = (*EventBus)(nil)
+
+// EventBus is the central event management system, responsible for routing events
+// from publishers to subscribers and handlers, processing them through middleware,
+// and managing overall event flow.
 type EventBus struct {
 	subscribers     map[EventType][]Subscriber
 	eventHandlers   map[EventType][]EventHandler
@@ -18,7 +24,7 @@ type EventBus struct {
 	deadLetterQueue *DeadLetterQueue
 	config          EventBusConfig
 	logger          *slog.Logger
-	mu              sync.RWMutex
+	mu              sync.RWMutex // mu protects access to subscribers, eventHandlers, middleware, and the running state.
 	running         bool
 	stopCh          chan struct{}
 }
@@ -348,7 +354,11 @@ func NewEventBus(config EventBusConfig, logger *slog.Logger) (*EventBus, error) 
 	return bus, nil
 }
 
-// Start starts the event bus
+// Start starts the event bus.
+// Currently, Start primarily sets the 'running' flag.
+// If AsyncProcessing is enabled in the config, Publish launches a new goroutine per event.
+// A more advanced implementation might use Start to initialize a worker pool,
+// which would then utilize eb.stopCh for graceful shutdown.
 func (eb *EventBus) Start(ctx context.Context) error {
 	eb.mu.Lock()
 	defer eb.mu.Unlock()
@@ -452,9 +462,14 @@ func (eb *EventBus) AddMiddleware(middleware Middleware) error {
 
 // Publish publishes an event to the bus
 func (eb *EventBus) Publish(ctx context.Context, event Event) error {
+	// Acquire read lock to safely check 'running' state and 'AsyncProcessing' config.
+	eb.mu.RLock()
 	if !eb.running {
+		eb.mu.RUnlock()
 		return fmt.Errorf("event bus is not running")
 	}
+	isAsync := eb.config.AsyncProcessing
+	eb.mu.RUnlock() // Release lock after reading shared state.
 
 	// Set event ID if not provided
 	if event.ID == "" {
@@ -471,18 +486,31 @@ func (eb *EventBus) Publish(ctx context.Context, event Event) error {
 		slog.String("type", string(event.Type)),
 		slog.String("source", event.Source))
 
-	// Update metrics
+	// Update metrics (updateMetrics has its own internal lock)
 	eb.updateMetrics(func(m *EventMetrics) {
 		m.TotalEvents++
 	})
 
-	if eb.config.AsyncProcessing {
-		go eb.processEvent(ctx, event)
+	if isAsync {
+		// Launching a new goroutine for asynchronous event processing.
+		// The processEvent function is responsible for handling the event lifecycle,
+		// including context cancellation and error handling.
+		go func() {
+			// It's important that processEvent itself checks ctx.Done() if it's long-running
+			// or before performing significant work.
+			processingErr := eb.processEvent(ctx, event)
+			if processingErr != nil {
+				// Note: handleEventError is already called within processEvent for failures.
+				// Additional logging here could be for an overview of async task completion status if desired.
+				eb.logger.Error("Async event processing finished with error",
+					slog.String("event_id", event.ID),
+					slog.Any("error", processingErr))
+			}
+		}()
+		return nil // Return immediately for async publishing.
 	} else {
 		return eb.processEvent(ctx, event)
 	}
-
-	return nil
 }
 
 // processEvent processes an event through the middleware chain and subscribers
@@ -538,6 +566,8 @@ func (eb *EventBus) processMiddleware(ctx context.Context, event Event, index in
 
 // processHandlers processes event through handlers
 func (eb *EventBus) processHandlers(ctx context.Context, event Event) error {
+	// Acquire read lock to safely access the eventHandlers map.
+	// This allows concurrent reads but prevents modification of the map during iteration.
 	eb.mu.RLock()
 	handlers := eb.eventHandlers[event.Type]
 	eb.mu.RUnlock()
@@ -557,6 +587,8 @@ func (eb *EventBus) processHandlers(ctx context.Context, event Event) error {
 
 // notifySubscribers notifies all subscribers of the event
 func (eb *EventBus) notifySubscribers(ctx context.Context, event Event) error {
+	// Acquire read lock to safely access the subscribers map.
+	// This allows concurrent reads but prevents modification of the map during iteration.
 	eb.mu.RLock()
 	subscribers := eb.subscribers[event.Type]
 	eb.mu.RUnlock()

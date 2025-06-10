@@ -15,7 +15,7 @@ import (
 	"github.com/koopa0/assistant-go/internal/conversation"
 	converrors "github.com/koopa0/assistant-go/internal/conversation"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
-	"github.com/koopa0/assistant-go/internal/tool"
+	"github.com/koopa0/assistant-go/internal/tool" // For tool.RegistryService
 	userserrors "github.com/koopa0/assistant-go/internal/user"
 )
 
@@ -32,22 +32,22 @@ import (
 type Processor struct {
 	config          *config.Config
 	db              postgres.DB
-	registry        *tool.Registry
+	registry        tool.RegistryService // Changed type
 	logger          *slog.Logger
 	conversationMgr conversation.ConversationService
-	aiService       *ai.Service
+	aiService       ai.AIService // Changed type
 	envDetector     *EnvironmentDetector
 }
 
 // NewProcessor creates a new processor with enhanced error handling
-func NewProcessor(cfg *config.Config, db postgres.DB, registry *tool.Registry, logger *slog.Logger) (*Processor, error) {
+func NewProcessor(cfg *config.Config, db postgres.DB, registry tool.RegistryService, logger *slog.Logger) (*Processor, error) { // Changed registry type
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
 	if db == nil {
 		return nil, fmt.Errorf("database is required")
 	}
-	if registry == nil {
+	if registry == nil { // Still check for nil, even if it's an interface
 		return nil, fmt.Errorf("tool_registry is required")
 	}
 	if logger == nil {
@@ -57,7 +57,7 @@ func NewProcessor(cfg *config.Config, db postgres.DB, registry *tool.Registry, l
 	conversationMgr := conversation.NewConversationSystem(db.GetQueries(), logger)
 
 	// Initialize AI service
-	aiService, err := ai.NewService(cfg, logger)
+	concreteAIService, err := ai.NewService(cfg, logger) // concreteAIService is *ai.Service
 	if err != nil {
 		return nil, NewAssistantInitializationError("ai_service", err)
 	}
@@ -65,10 +65,10 @@ func NewProcessor(cfg *config.Config, db postgres.DB, registry *tool.Registry, l
 	return &Processor{
 		config:          cfg,
 		db:              db,
-		registry:        registry,
+		registry:        registry, // registry is now tool.RegistryService
 		logger:          logger,
 		conversationMgr: conversationMgr,
-		aiService:       aiService,
+		aiService:       concreteAIService, // Assign *ai.Service to ai.AIService field
 		envDetector:     NewEnvironmentDetector(),
 	}, nil
 }
@@ -89,7 +89,8 @@ func NewProcessor(cfg *config.Config, db postgres.DB, registry *tool.Registry, l
 // conversation state throughout the interaction.
 func (p *Processor) Process(ctx context.Context, request *QueryRequest) (*QueryResponse, error) {
 	if request == nil {
-		return nil, fmt.Errorf("request is required")
+		// Using existing custom error for invalid input.
+		return nil, NewAssistantInvalidInputError("request cannot be nil", nil)
 	}
 
 	startTime := time.Now()
@@ -346,7 +347,8 @@ func (p *Processor) getOrCreateConversation(ctx context.Context, request *QueryR
 				p.logger.Warn("Conversation not found, creating new one",
 					slog.String("conversation_id", *request.ConversationID))
 			} else {
-				return nil, err
+				// Wrap error from conversation manager for context.
+				return nil, NewAssistantProcessingError("get_conversation_dependency", fmt.Errorf("failed to get conversation '%s': %w", *request.ConversationID, err))
 			}
 		} else {
 			return conversation, nil
@@ -356,13 +358,15 @@ func (p *Processor) getOrCreateConversation(ctx context.Context, request *QueryR
 	// Extract user ID from request or context
 	userID, err := p.extractUserIDFromContext(ctx, request)
 	if err != nil {
-		return nil, userserrors.NewUnauthorizedError("Failed to extract user ID from request context")
+		// Wrap error from user ID extraction.
+		return nil, NewAssistantProcessingError("user_id_extraction", fmt.Errorf("could not determine user for conversation: %w", err))
 	}
 
 	title := p.generateConversationTitle(request.Query)
 	conversation, err := p.conversationMgr.CreateConversation(ctx, userID, title)
 	if err != nil {
-		return nil, err
+		// Wrap error from conversation manager during creation.
+		return nil, NewAssistantProcessingError("create_conversation_dependency", fmt.Errorf("failed to create new conversation for user '%s': %w", userID, err))
 	}
 
 	return conversation, nil
@@ -403,7 +407,10 @@ func (p *Processor) extractUserIDFromContext(ctx context.Context, request *Query
 	}
 
 	// No valid user ID found
-	return "", fmt.Errorf("no authenticated user found in request or context")
+	// Return a more specific error if no user ID can be found.
+	// Using NewAssistantInvalidInputError as per subtask instructions.
+	// Ideally, a user.ErrAuthenticationRequired or similar could be used if defined.
+	return "", NewAssistantInvalidInputError("user identification failed", fmt.Errorf("no authenticated user found in request or context"))
 }
 
 // generateConversationTitle generates a title for a new conversation
@@ -651,7 +658,8 @@ func (p *Processor) executeTools(ctx context.Context, toolNames []string, toolPa
 
 		// Check if tool is registered
 		if !p.registry.IsRegistered(toolName) {
-			err := fmt.Errorf("tool not registered: %s", toolName)
+			// Use the specific error from the tool package.
+			err := tool.NewToolNotRegisteredError(toolName)
 			p.logger.Warn("Tool not found",
 				slog.String("tool", toolName),
 				slog.Any("error", err))
@@ -669,11 +677,13 @@ func (p *Processor) executeTools(ctx context.Context, toolNames []string, toolPa
 			p.logger.Error("Failed to get tool instance",
 				slog.String("tool", toolName),
 				slog.Any("error", err))
+			// Wrap error from tool registry when failing to get a tool instance.
+			wrappedErr := NewAssistantToolError(toolName, fmt.Errorf("failed to get instance: %w", err))
 			results[toolName] = map[string]interface{}{
-				"error":  err.Error(),
+				"error":  wrappedErr.Error(),
 				"status": "get_failed",
 			}
-			lastError = err
+			lastError = wrappedErr // Assign wrapped error
 			continue
 		}
 
@@ -709,12 +719,14 @@ func (p *Processor) executeTools(ctx context.Context, toolNames []string, toolPa
 				slog.String("tool", toolName),
 				slog.Duration("execution_time", executionTime),
 				slog.Any("error", toolErr))
+			// Wrap tool execution error with AssistantToolError for consistent error type.
+			wrappedToolErr := NewAssistantToolError(toolName, toolErr)
 			results[toolName] = map[string]interface{}{
-				"error":          toolErr.Error(),
+				"error":          wrappedToolErr.Error(), // Use .Error() for the map if it's just for string display
 				"status":         "execution_failed",
 				"execution_time": executionTime.String(),
 			}
-			lastError = toolErr
+			lastError = wrappedToolErr // Assign wrapped error
 			continue
 		}
 
@@ -1100,14 +1112,6 @@ func (p *Processor) analyzeQueryContext(ctx context.Context, request *QueryReque
 }
 
 // Helper functions
-func getMapKeys(m map[string]interface{}) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
 func containsAny(text string, keywords []string) bool {
 	textLower := strings.ToLower(text)
 	for _, keyword := range keywords {
@@ -1192,6 +1196,9 @@ func (p *Processor) ProcessStream(ctx context.Context, request *QueryRequest) (<
 
 	// Start processing in goroutine
 	go func() {
+		// This goroutine handles the entire streaming pipeline for a request.
+		// It ensures that the output chunkChan is always closed upon completion or error.
+		// Dependencies like conversationMgr and aiService are expected to be safe for concurrent use.
 		defer close(chunkChan)
 
 		startTime := time.Now()
@@ -1314,6 +1321,8 @@ func (p *Processor) ProcessStream(ctx context.Context, request *QueryRequest) (<
 		}
 
 		// Get streaming response from AI
+		// The context (ctx) is passed to the AI service's streaming method,
+		// allowing for cancellation to be propagated down the call chain.
 		streamResp, err := p.aiService.GenerateResponseStream(ctx, aiRequest, provider)
 		if err != nil {
 			chunkChan <- &StreamChunk{

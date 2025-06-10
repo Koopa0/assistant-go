@@ -19,7 +19,9 @@ import (
 	"github.com/koopa0/assistant-go/internal/user"
 )
 
-// AnalyticsService handles analytics and visualization logic
+// AnalyticsService handles analytics and visualization logic.
+// It is designed to be safe for concurrent use as its methods operate on
+// request-scoped data or depend on concurrency-safe components (like sqlc.Queries).
 type AnalyticsService struct {
 	db      *sqlc.Queries
 	logger  *slog.Logger

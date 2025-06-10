@@ -12,7 +12,7 @@ import (
 	"github.com/koopa0/assistant-go/internal/conversation"
 	"github.com/koopa0/assistant-go/internal/langchain"
 	"github.com/koopa0/assistant-go/internal/platform/storage/postgres"
-	"github.com/koopa0/assistant-go/internal/tool"
+	"github.com/koopa0/assistant-go/internal/tool" // Ensured
 	"github.com/koopa0/assistant-go/internal/tool/docker"
 	"github.com/koopa0/assistant-go/internal/tool/godev"
 	postgrestool "github.com/koopa0/assistant-go/internal/tool/postgres"
@@ -35,7 +35,7 @@ type Assistant struct {
 	config           *config.Config                   // Application configuration
 	db               postgres.DB                      // Database client for persistence
 	logger           *slog.Logger                     // Structured logger
-	registry         *tool.Registry                   // Tool registry for available tools
+	registry         tool.RegistryService             // <<< CHANGED TYPE HERE
 	processor        *Processor                       // Request processing pipeline
 	conversationMgr  conversation.ConversationService // Conversation service
 	langchainService *langchain.Service               // LangChain integration service
@@ -143,7 +143,8 @@ func New(ctx context.Context, cfg *config.Config, db postgres.DB, logger *slog.L
 	registry := tool.NewRegistry(logger)
 
 	// Initialize conversation service using factory function
-	conversationMgr := conversation.NewConversationSystem(db.GetQueries(), logger)
+	// Pass the db instance (postgres.DB) directly, as NewConversationSystem now expects postgres.DB
+	conversationMgr := conversation.NewConversationSystem(db, logger)
 
 	// Initialize processor
 	processor, err := NewProcessor(cfg, db, registry, logger)
@@ -427,7 +428,10 @@ func (a *Assistant) registerBuiltinTools(ctx context.Context) error {
 
 	// Register Go development tool factory
 	godevFactory := func(cfg *tool.ToolConfig, logger *slog.Logger) (tool.Tool, error) {
-		return godev.NewGoDevTool(logger), nil
+		// Instantiate the concrete WorkspaceDetector which implements godev.DetectorService.
+		workspaceDetector := godev.NewWorkspaceDetector(logger)
+		// Pass the concrete detector to NewGoDevTool, which now expects the DetectorService interface.
+		return godev.NewGoDevTool(workspaceDetector, logger), nil
 	}
 	if err := a.registry.Register("godev", godevFactory); err != nil {
 		return fmt.Errorf("failed to register godev tool: %w", err)

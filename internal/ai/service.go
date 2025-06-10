@@ -15,11 +15,14 @@ import (
 	"github.com/koopa0/assistant-go/internal/config"
 )
 
+// Static assertion to ensure *Service implements AIService
+var _ AIService = (*Service)(nil)
+
 // Service provides a unified AI service using direct dependencies
 // Uses concrete clients instead of interfaces for simplicity
 type Service struct {
-	claudeClient    *claude.Client
-	geminiClient    *gemini.Client
+	claudeClient    ClaudeProviderClient
+	geminiClient    GeminiProviderClient
 	promptService   *prompt.PromptService
 	defaultProvider string
 	logger          *slog.Logger
@@ -52,11 +55,11 @@ func NewService(cfg *config.Config, logger *slog.Logger) (*Service, error) {
 			Timeout:     30 * time.Second,
 		}
 
-		claudeClient, err := claude.NewClient(claudeConfig, logger)
+		concreteClaudeClient, err := claude.NewClient(claudeConfig, logger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Claude client: %w", err)
 		}
-		svc.claudeClient = claudeClient
+		svc.claudeClient = concreteClaudeClient
 		logger.Info("Claude client initialized")
 	}
 
@@ -71,11 +74,11 @@ func NewService(cfg *config.Config, logger *slog.Logger) (*Service, error) {
 			Timeout:     30 * time.Second,
 		}
 
-		geminiClient, err := gemini.NewClient(geminiConfig, logger)
+		concreteGeminiClient, err := gemini.NewClient(geminiConfig, logger)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 		}
-		svc.geminiClient = geminiClient
+		svc.geminiClient = concreteGeminiClient
 		logger.Info("Gemini client initialized")
 	}
 
@@ -120,7 +123,8 @@ func (s *Service) GenerateResponse(ctx context.Context, request *GenerateRequest
 		}
 		resp, err := s.claudeClient.GenerateResponse(ctx, claudeReq)
 		if err != nil {
-			return nil, err
+			// Wrap provider client error for context.
+			return nil, fmt.Errorf("ai.Service: Claude provider error during GenerateResponse: %w", err)
 		}
 		return convertClaudeResponse(resp), nil
 	case "gemini":
@@ -138,7 +142,8 @@ func (s *Service) GenerateResponse(ctx context.Context, request *GenerateRequest
 		}
 		resp, err := s.geminiClient.GenerateResponse(ctx, geminiReq)
 		if err != nil {
-			return nil, err
+			// Wrap provider client error for context.
+			return nil, fmt.Errorf("ai.Service: Gemini provider error during GenerateResponse: %w", err)
 		}
 		return convertGeminiResponse(resp), nil
 	default:
@@ -160,7 +165,8 @@ func (s *Service) GenerateEmbedding(ctx context.Context, text string, providerNa
 		}
 		resp, err := s.claudeClient.GenerateEmbedding(ctx, text)
 		if err != nil {
-			return nil, err
+			// Wrap provider client error for context.
+			return nil, fmt.Errorf("ai.Service: Claude provider error during GenerateEmbedding: %w", err)
 		}
 		return convertClaudeEmbeddingResponse(resp), nil
 	case "gemini":
@@ -169,7 +175,8 @@ func (s *Service) GenerateEmbedding(ctx context.Context, text string, providerNa
 		}
 		resp, err := s.geminiClient.GenerateEmbedding(ctx, text)
 		if err != nil {
-			return nil, err
+			// Wrap provider client error for context.
+			return nil, fmt.Errorf("ai.Service: Gemini provider error during GenerateEmbedding: %w", err)
 		}
 		return convertGeminiEmbeddingResponse(resp), nil
 	default:
@@ -223,12 +230,16 @@ func (s *Service) Health(ctx context.Context) error {
 // GetUsageStats returns usage statistics for all providers
 func (s *Service) GetUsageStats(ctx context.Context) (map[string]*UsageStats, error) {
 	stats := make(map[string]*UsageStats)
+	var encounteredError error // To store the first error
 
 	if s.claudeClient != nil {
 		providerStats, err := s.claudeClient.GetUsage(ctx)
 		if err != nil {
-			s.logger.Warn("Failed to get usage stats for Claude",
-				slog.Any("error", err))
+			s.logger.Warn("Failed to get usage stats for Claude", slog.Any("error", err))
+			// Store first error encountered for Claude.
+			if encounteredError == nil {
+				encounteredError = fmt.Errorf("failed to get usage stats for Claude: %w", err)
+			}
 		} else {
 			stats["claude"] = convertClaudeUsageStats(providerStats)
 		}
@@ -237,14 +248,21 @@ func (s *Service) GetUsageStats(ctx context.Context) (map[string]*UsageStats, er
 	if s.geminiClient != nil {
 		providerStats, err := s.geminiClient.GetUsage(ctx)
 		if err != nil {
-			s.logger.Warn("Failed to get usage stats for Gemini",
-				slog.Any("error", err))
+			s.logger.Warn("Failed to get usage stats for Gemini", slog.Any("error", err))
+			// Store first error encountered for Gemini, or append to existing.
+			if encounteredError == nil {
+				encounteredError = fmt.Errorf("failed to get usage stats for Gemini: %w", err)
+			} else {
+				// Optionally, append errors:
+				// encounteredError = fmt.Errorf("%v; failed to get usage stats for Gemini: %w", encounteredError, err)
+			}
 		} else {
 			stats["gemini"] = convertGeminiUsageStats(providerStats)
 		}
 	}
 
-	return stats, nil
+	// Return accumulated stats along with any error encountered.
+	return stats, encounteredError
 }
 
 // Close closes all provider connections
