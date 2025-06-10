@@ -9,7 +9,13 @@ import (
 	"time"
 )
 
-// EventBus is the central event management system
+// Static assertions to ensure *EventBus implements the defined interfaces.
+var _ EventPublisher = (*EventBus)(nil)
+var _ EventBusService = (*EventBus)(nil)
+
+// EventBus is the central event management system, responsible for routing events
+// from publishers to subscribers and handlers, processing them through middleware,
+// and managing overall event flow.
 type EventBus struct {
 	subscribers     map[EventType][]Subscriber
 	eventHandlers   map[EventType][]EventHandler

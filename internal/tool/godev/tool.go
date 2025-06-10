@@ -12,16 +12,18 @@ import (
 	"github.com/koopa0/assistant-go/internal/tool"
 )
 
-// GoDevTool implements the Tool interface for Go development functionality
+// GoDevTool provides capabilities for analyzing Go development workspaces.
+// It uses a DetectorService to gather information about the workspace.
 type GoDevTool struct {
-	detector *WorkspaceDetector
+	detector DetectorService // Changed type: Uses DetectorService interface
 	logger   *slog.Logger
 }
 
-// NewGoDevTool creates a new Go development tool
-func NewGoDevTool(logger *slog.Logger) *GoDevTool {
+// NewGoDevTool creates a new Go development tool, requiring a DetectorService
+// for workspace analysis and a logger.
+func NewGoDevTool(detector DetectorService, logger *slog.Logger) *GoDevTool { // Added detector parameter
 	return &GoDevTool{
-		detector: NewWorkspaceDetector(logger),
+		detector: detector, // Assign injected detector
 		logger:   logger,
 	}
 }

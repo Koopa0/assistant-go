@@ -1,9 +1,12 @@
-// Package errors provides the base error types and utilities for the Assistant application
-// following CLAUDE.md best practices with proper error hierarchy and structured information.
+// Package errors provides a foundational framework for creating structured,
+// consistent errors throughout the application. It defines a base error type,
+// 'AssistantError', which includes common attributes like error codes,
+// categories (e.g., validation, infrastructure, business), severity,
+// user-facing messages, and context.
 //
-// This package contains only the core error types and helper functions. Domain-specific
-// errors are defined in their respective feature packages to follow the "package by feature"
-// principle.
+// Domain-specific packages can use this framework to define their own
+// detailed errors while maintaining a common structure for error handling
+// and reporting.
 package errors
 
 import (
