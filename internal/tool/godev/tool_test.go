@@ -16,8 +16,9 @@ func TestGoDevTool_Basic(t *testing.T) {
 		Level: slog.LevelError, // Quiet during tests
 	}))
 
-	// Create the tool
-	gdTool := NewGoDevTool(logger)
+	// Create detector and tool
+	detector := NewWorkspaceDetector(logger)
+	gdTool := NewGoDevTool(detector, logger)
 
 	// Test basic properties
 	if gdTool.Name() != "godev" {
@@ -53,8 +54,9 @@ func TestGoDevTool_DetectCurrentProject(t *testing.T) {
 		Level: slog.LevelError, // Quiet during tests
 	}))
 
-	// Create the tool
-	gdTool := NewGoDevTool(logger)
+	// Create detector and tool
+	detector := NewWorkspaceDetector(logger)
+	gdTool := NewGoDevTool(detector, logger)
 
 	// Test detection on current project (should have go.mod)
 	goInput := GoDevInput{
@@ -91,8 +93,9 @@ func TestGoDevTool_InvalidAction(t *testing.T) {
 		Level: slog.LevelError, // Quiet during tests
 	}))
 
-	// Create the tool
-	gdTool := NewGoDevTool(logger)
+	// Create detector and tool
+	detector := NewWorkspaceDetector(logger)
+	gdTool := NewGoDevTool(detector, logger)
 
 	// Test with invalid action
 	goInput := GoDevInput{
@@ -125,8 +128,9 @@ func TestGoDevTool_JSONInput(t *testing.T) {
 		Level: slog.LevelError, // Quiet during tests
 	}))
 
-	// Create the tool
-	gdTool := NewGoDevTool(logger)
+	// Create detector and tool
+	detector := NewWorkspaceDetector(logger)
+	gdTool := NewGoDevTool(detector, logger)
 
 	// Test JSON input
 	jsonInput := `{"action": "detect", "path": "../../../"}`
@@ -147,8 +151,9 @@ func TestGoDevTool_InvalidJSON(t *testing.T) {
 		Level: slog.LevelError, // Quiet during tests
 	}))
 
-	// Create the tool
-	gdTool := NewGoDevTool(logger)
+	// Create detector and tool
+	detector := NewWorkspaceDetector(logger)
+	gdTool := NewGoDevTool(detector, logger)
 
 	// Test invalid JSON
 	invalidJSON := `{"action": "detect", "path": }`
@@ -169,8 +174,9 @@ func TestGoDevTool_SampleUsage(t *testing.T) {
 		Level: slog.LevelError, // Quiet during tests
 	}))
 
-	// Create the tool
-	gdTool := NewGoDevTool(logger)
+	// Create detector and tool
+	detector := NewWorkspaceDetector(logger)
+	gdTool := NewGoDevTool(detector, logger)
 
 	// Test that sample usage examples are valid JSON
 	samples := gdTool.GetSampleUsage()
@@ -193,8 +199,9 @@ func BenchmarkGoDevTool_Detect(b *testing.B) {
 		Level: slog.LevelError, // Quiet during benchmarks
 	}))
 
-	// Create the tool
-	gdTool := NewGoDevTool(logger)
+	// Create detector and tool
+	detector := NewWorkspaceDetector(logger)
+	gdTool := NewGoDevTool(detector, logger)
 
 	// Benchmark input
 	goInput := GoDevInput{

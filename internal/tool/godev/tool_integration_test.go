@@ -15,7 +15,8 @@ import (
 
 func TestGoDevTool_Integration(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	gdTool := godev.NewGoDevTool(logger)
+	detector := godev.NewWorkspaceDetector(logger)
+	gdTool := godev.NewGoDevTool(detector, logger)
 
 	ctx := context.Background()
 
@@ -113,7 +114,8 @@ func main() {
 
 func TestGoDevTool_ErrorHandling(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	gdTool := godev.NewGoDevTool(logger)
+	detector := godev.NewWorkspaceDetector(logger)
+	gdTool := godev.NewGoDevTool(detector, logger)
 
 	ctx := context.Background()
 
