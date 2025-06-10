@@ -136,7 +136,10 @@ func (s *Service) ListConversations(ctx context.Context, userID string) ([]*Conv
 		return nil, fmt.Errorf("list conversations: %w", err)
 	}
 
-	// Convert all rows and filter active conversations
+	// Convert all rows and filter active conversations.
+	// If an individual conversation entry fails to convert (e.g., due to malformed metadata),
+	// the error is logged, and that specific entry is skipped. The operation
+	// will still return a list of successfully converted conversations.
 	conversations := make([]*Conversation, 0)
 	for _, row := range rows {
 		conv, err := s.toDomainConversation(row)

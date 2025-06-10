@@ -22,16 +22,17 @@ import (
 type Service struct {
 	queries sqlc.Querier
 	logger  *slog.Logger
-	working *WorkingMemory
+	working WorkingMemoryInterface // Changed type
 	mu      sync.RWMutex
 }
 
-// NewService creates a new memory service
-func NewService(queries sqlc.Querier, logger *slog.Logger) *Service {
+// NewService creates a new core memory service.
+// It requires a Querier for database access and a WorkingMemoryInterface for in-memory operations.
+func NewService(queries sqlc.Querier, logger *slog.Logger, workingMem WorkingMemoryInterface) *Service { // Added workingMem parameter
 	return &Service{
 		queries: queries,
 		logger:  logger,
-		working: NewWorkingMemory(100),
+		working: workingMem, // Assign injected working memory
 	}
 }
 
@@ -173,7 +174,7 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 }
 
 // GetWorkingMemory returns the working memory instance for direct access
-func (s *Service) GetWorkingMemory() *WorkingMemory {
+func (s *Service) GetWorkingMemory() WorkingMemoryInterface { // Changed return type
 	return s.working
 }
 

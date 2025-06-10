@@ -15,6 +15,9 @@ import (
 	"github.com/koopa0/assistant-go/internal/config"
 )
 
+// Static assertion to ensure *Client implements ClientService.
+var _ ClientService = (*Client)(nil)
+
 // Local type definitions to avoid import cycles
 
 // Message represents a message in a conversation
@@ -138,6 +141,12 @@ func NewClient(provider string, aiConfig interface{}, langchainConfig config.Lan
 // Name returns the provider name
 func (c *Client) Name() string {
 	return fmt.Sprintf("langchain-%s", c.provider)
+}
+
+// LLM returns the underlying llms.Model instance.
+// This is required to satisfy the ClientService interface.
+func (c *Client) LLM() llms.Model {
+	return c.llm
 }
 
 // GenerateResponse generates a response using LangChain-Go

@@ -133,9 +133,14 @@ func (s *Server) setupRoutes() {
 	// === Domain-Driven API Services ===
 
 	// Auth Service
-	authService := user.NewAuthService(sqlcQueries, s.logger, s.metrics, jwtSecret)
-	s.authService = authService // Save for middleware
-	authHandler := user.NewAuthHTTPHandler(authService)
+	// Instantiate TokenService first, as it's a dependency for AuthService
+	// and also used by the server's authMiddleware via s.authService.
+	tokenService := user.NewTokenService(jwtSecret, "assistant-api", s.logger)
+	s.authService = tokenService // Assign the concrete TokenService to the JWTService interface field for middleware use.
+
+	// Create AuthService, injecting the TokenService.
+	authServiceForHandler := user.NewAuthService(sqlcQueries, s.logger, s.metrics, tokenService)
+	authHandler := user.NewAuthHTTPHandler(authServiceForHandler)
 	authHandler.RegisterRoutes(s.mux)
 
 	// Users Service
@@ -147,11 +152,18 @@ func (s *Server) setupRoutes() {
 
 	// Memory Service - 記憶系統 API
 	if sqlcQueries != nil {
-		// Create database-backed memory service
-		coreMemoryService := memory.NewService(sqlcQueries, s.logger)
-		// Create database memory store using the core service
+		// Instantiate WorkingMemory, which is an in-memory component for the core memory service.
+		// TODO: Consider making working memory capacity configurable if not already.
+		defaultWorkingMemoryCapacity := 100
+		workingMemoryInstance := memory.NewWorkingMemory(defaultWorkingMemoryCapacity)
+
+		// Create the core memory service, injecting the SQLC queries and the working memory instance.
+		coreMemoryService := memory.NewService(sqlcQueries, s.logger, workingMemoryInstance)
+		// Create database memory store using the core service.
+		// This store adapts the coreMemoryService to the MemoryStore interface required by HTTPMemoryService.
 		memoryStore := memory.NewDatabaseMemoryStore(coreMemoryService, s.logger)
-		// Create HTTP memory service that implements HTTPMemoryServiceInterface
+		// Create HTTP memory service that implements HTTPMemoryServiceInterface.
+		// This service is responsible for handling HTTP API logic for memory operations.
 		httpMemoryService := memory.NewMemoryService(memoryStore, s.logger, s.metrics)
 		memoryHandler := memoryhttp.NewHandler(httpMemoryService, s.logger)
 		memoryHandler.RegisterRoutes(s.mux)
@@ -183,7 +195,8 @@ func (s *Server) setupRoutes() {
 	// WebSocket Service
 	wsService := websocket.NewWebSocketService(s.assistant, s.logger, s.metrics)
 	// WebSocket 使用相同的 JWT secret（已在上面驗證過）
-	wsAuthService := user.NewAuthService(sqlcQueries, s.logger, s.metrics, jwtSecret)
+	// Create another AuthService instance for WebSocket, injecting the same TokenService.
+	wsAuthService := user.NewAuthService(sqlcQueries, s.logger, s.metrics, tokenService)
 	wsHandler := websocket.NewHTTPHandler(wsService, wsAuthService, s.logger)
 	wsHandler.RegisterRoutes(s.mux)
 	// Start WebSocket background tasks
