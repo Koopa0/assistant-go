@@ -52,6 +52,8 @@ func (s *Service) GenerateResponseStream(ctx context.Context, request *GenerateS
 
 	// Start streaming in goroutine
 	go func() {
+		// This goroutine manages the streaming response from the selected AI provider.
+		// It ensures chunkChan and doneChan are closed when the stream finishes or an error occurs.
 		defer close(chunkChan)
 		defer close(doneChan)
 
@@ -114,6 +116,9 @@ func (s *Service) streamFromClaude(ctx context.Context, request *GenerateStreamR
 	var totalContent strings.Builder
 	var tokensUsed TokenUsage
 
+	// Process the Server-Sent Events (SSE) stream from Claude.
+	// The select statement handles incoming events, errors, stream completion,
+	// and context cancellation.
 	for {
 		select {
 		case event, ok := <-streamResp.Events():
@@ -175,6 +180,7 @@ func (s *Service) streamFromClaude(ctx context.Context, request *GenerateStreamR
 			return
 
 		case <-ctx.Done():
+			// Handle context cancellation (e.g., client disconnected or timeout).
 			chunkChan <- StreamChunk{Error: ctx.Err()}
 			return
 		}
@@ -182,6 +188,10 @@ func (s *Service) streamFromClaude(ctx context.Context, request *GenerateStreamR
 }
 
 // streamFromGemini handles streaming from Gemini
+// This function currently SIMULATES streaming for Gemini as the underlying
+// client may not support true real-time streaming. It calls the blocking GenerateResponse
+// and then chunks the output with artificial delays.
+// TODO: Implement real streaming when Gemini SDK/client supports it.
 func (s *Service) streamFromGemini(ctx context.Context, request *GenerateStreamRequest, chunkChan chan<- StreamChunk) {
 	// Similar to Claude, simulate streaming for now
 	// TODO: Implement real streaming when Gemini SDK supports it
@@ -222,8 +232,9 @@ func (s *Service) streamFromGemini(ctx context.Context, request *GenerateStreamR
 			buffer = buffer[:0]
 
 			select {
-			case <-time.After(20 * time.Millisecond):
+			case <-time.After(20 * time.Millisecond): // Artificial delay
 			case <-ctx.Done():
+				// Even in simulated streaming, respect context cancellation.
 				return
 			}
 		}

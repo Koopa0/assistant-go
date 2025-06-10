@@ -105,6 +105,9 @@ func (r *Registry) Unregister(name string) error {
 
 	// Close the tool if it's instantiated
 	if tool, exists := r.tools[name]; exists {
+		// Attempt to close the tool instance. Errors during close are logged
+		// as warnings but do not cause Unregister to fail, treating cleanup as best-effort here.
+		// If tool closure is critical, this behavior might need to change to propagate the error.
 		if err := tool.Close(context.Background()); err != nil {
 			r.logger.Warn("Failed to close tool during unregistration",
 				slog.String("tool", name),
@@ -155,6 +158,7 @@ func (r *Registry) GetTool(name string, config *ToolConfig) (Tool, error) {
 	}()
 
 	if err != nil {
+		// Wrap error from tool factory to provide context.
 		return nil, fmt.Errorf("failed to create tool %s: %w", name, err)
 	}
 
@@ -201,27 +205,33 @@ func (r *Registry) Execute(ctx context.Context, name string, input *ToolInput, c
 		slog.Any("parameters", input.Parameters),
 		slog.Any("context", input.Context))
 
-	result, err := tool.Execute(ctx, input)
-	if err != nil {
+	// Execute the tool instance.
+	result, toolErr := tool.Execute(ctx, input) // toolErr is the original error from the specific tool
+	if toolErr != nil {
+		// Log the specific tool execution failure.
 		r.logger.Error("Tool execution failed",
 			slog.String("tool", name),
-			slog.Any("error", err),
+			slog.Any("error", toolErr), // Log the original error
 			slog.Duration("execution_time", time.Since(startTime)))
 
+		// Wrap the original toolErr with context about which tool failed for the caller.
+		wrappedErr := fmt.Errorf("tool '%s' execution failed: %w", name, toolErr)
 		return &ToolResult{
 			Success:       false,
-			Error:         err.Error(),
+			Error:         wrappedErr.Error(), // Populate ToolResult with the wrapped error's message
 			ExecutionTime: time.Since(startTime),
-		}, err
+		}, wrappedErr // Return the wrapped error
 	}
 
+	// If result is nil (successful execution but no explicit result data from tool)
 	if result == nil {
+		// Handle cases where a successful tool execution might return a nil result struct.
 		result = &ToolResult{
 			Success:       true,
 			ExecutionTime: time.Since(startTime),
 		}
 	} else {
-		result.ExecutionTime = time.Since(startTime)
+		result.ExecutionTime = time.Since(startTime) // Ensure execution time is set if result is not nil
 	}
 
 	r.logger.Debug("Tool execution completed",
@@ -314,6 +324,7 @@ func (r *Registry) Health(ctx context.Context) error {
 
 	for name, tool := range tools {
 		if err := tool.Health(ctx); err != nil {
+			// Wrap error from individual tool's health check.
 			return fmt.Errorf("tool %s health check failed: %w", name, err)
 		}
 	}

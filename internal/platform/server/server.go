@@ -395,20 +395,22 @@ func (s *Server) handleGetConversation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	conversation, err := s.assistant.GetConversation(ctx, conversationID)
+	conversationObj, err := s.assistant.GetConversation(ctx, conversationID) // Renamed from 'conversation' to avoid conflict
 	if err != nil {
-		// Check if it's a conversation not found error
-		// For now, just check the error message
-		if err.Error() == "conversation not found" || strings.Contains(err.Error(), "not found") {
-			http.Error(w, "Conversation not found", http.StatusNotFound)
+		// Check for specific 'not found' error to return HTTP 404.
+		if conversation.IsConversationNotFoundError(err) { // Using the helper from conversation.errors
+			s.logger.Warn("Conversation not found", slog.String("conversation_id", conversationID), slog.Any("error", err))
+			s.writeErrorResponse(w, http.StatusNotFound, "Conversation not found")
 		} else {
-			s.logger.Error("Failed to get conversation", slog.Any("error", err))
-			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			// For other errors, log details and return a generic server error.
+			// Consider using assterrors.GetAssistantError if applicable for more structured responses.
+			s.logger.Error("Failed to get conversation", slog.String("conversation_id", conversationID), slog.Any("error", err))
+			s.writeErrorResponse(w, http.StatusInternalServerError, "Failed to retrieve conversation")
 		}
 		return
 	}
 
-	s.writeJSONResponse(w, http.StatusOK, conversation)
+	s.writeJSONResponse(w, http.StatusOK, conversationObj)
 }
 
 // Delete conversation endpoint
@@ -490,10 +492,31 @@ func (s *Server) handleExecuteTool(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.assistant.ExecuteTool(ctx, toolReq)
 	if err != nil {
-		s.logger.Error("Tool execution failed",
+		s.logger.Error("Tool execution failed via API",
 			slog.String("tool", toolName),
 			slog.Any("error", err))
-		http.Error(w, fmt.Sprintf("Tool execution failed: %v", err), http.StatusInternalServerError)
+
+		// Use structured error handling for tool execution failures.
+		if assistantErr := assterrors.GetAssistantError(err); assistantErr != nil {
+			var statusCode int
+			switch assistantErr.Category {
+			case assterrors.CategoryValidation: // e.g., bad tool input
+				statusCode = http.StatusBadRequest
+			case assterrors.CategoryTool: // Specific tool execution error
+				// Consider if a more specific 5xx is available based on assistantErr.Code
+				statusCode = http.StatusInternalServerError
+				if assistantErr.Retryable {
+					// Potentially map to 503 if retryable, but 500 is generally safe for tool errors.
+				}
+			// Add other relevant categories if applicable
+			default:
+				statusCode = http.StatusInternalServerError
+			}
+			s.writeErrorResponse(w, statusCode, assistantErr.UserMessage)
+		} else {
+			// Fallback for non-AssistantError types
+			s.writeErrorResponse(w, http.StatusInternalServerError, "Tool execution failed due to an internal error")
+		}
 		return
 	}
 

@@ -73,6 +73,10 @@ func NewWebSocketService(assistant *assistant.Assistant, logger *slog.Logger, me
 
 // Start 啟動 WebSocket 服務
 func (s *WebSocketService) Start(ctx context.Context) {
+	// Start runs the main event loop for the WebSocket service.
+	// It listens on channels for client registrations, unregistrations, and broadcast messages,
+	// serializing operations on the shared 'clients' map to ensure concurrency safety.
+	// The loop also respects context cancellation for graceful shutdown.
 	s.logger.Info("Starting WebSocket service")
 
 	for {
@@ -143,6 +147,9 @@ func (s *WebSocketService) SendToUser(userID string, message Message) error {
 			case client.Send <- messageBytes:
 				sent++
 			default:
+				// Non-blocking send. If the client's send channel is full
+				// (e.g., client is slow or disconnected), the message is dropped for this client
+				// to prevent blocking the SendToUser operation for other clients of the same user.
 				s.logger.Warn("Client send channel full",
 					slog.String("client_id", client.ID))
 			}
@@ -205,6 +212,9 @@ func (s *WebSocketService) GetConnectionStats() map[string]interface{} {
 // 內部方法
 
 // registerClient 註冊客戶端
+// registerClient adds a new client to the service.
+// It locks the mutex to safely modify the shared 'clients' map,
+// although typically called by the single Start goroutine, this ensures safety.
 func (s *WebSocketService) registerClient(client *Client) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -235,6 +245,9 @@ func (s *WebSocketService) registerClient(client *Client) {
 }
 
 // unregisterClient 取消註冊客戶端
+// unregisterClient removes a client from the service.
+// It locks the mutex to safely modify the shared 'clients' map,
+// similar to registerClient, ensuring safety although typically called serially.
 func (s *WebSocketService) unregisterClient(client *Client) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -259,7 +272,10 @@ func (s *WebSocketService) broadcastMessage(message []byte) {
 		select {
 		case client.Send <- message:
 		default:
-			s.logger.Warn("Failed to send broadcast message",
+			// Non-blocking send for broadcast. If a client's send channel is full,
+			// this message is dropped for that specific client to avoid blocking the
+			// broadcast operation for all other clients.
+			s.logger.Warn("Failed to send broadcast message to client (channel full)",
 				slog.String("client_id", clientID))
 		}
 	}
@@ -268,6 +284,9 @@ func (s *WebSocketService) broadcastMessage(message []byte) {
 // Client 方法
 
 // readPump 讀取客戶端訊息
+// readPump pumps messages from the WebSocket connection to the hub (via handleMessage).
+// It runs in its own goroutine for each client. Ensures cleanup via defers.
+// Adheres to the Gorilla WebSocket model of one concurrent reader per connection.
 func (c *Client) readPump() {
 	defer func() {
 		c.Service.unregister <- c
@@ -297,6 +316,10 @@ func (c *Client) readPump() {
 }
 
 // writePump 寫入訊息到客戶端
+// writePump pumps messages from the client's Send channel to the WebSocket connection.
+// It runs in its own goroutine for each client. Handles ping messages and ensures
+// connection closure on exit. Adheres to the Gorilla WebSocket model of one concurrent
+// writer per connection.
 func (c *Client) writePump() {
 	ticker := time.NewTicker(54 * time.Second)
 	defer func() {

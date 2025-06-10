@@ -528,7 +528,10 @@ func (s *Service) userToProfile(user sqlc.User) *UserProfile {
 	var preferences map[string]interface{}
 	if user.Preferences != nil {
 		if err := json.Unmarshal(user.Preferences, &preferences); err != nil {
-			s.logger.Warn("Failed to parse user preferences", slog.Any("error", err))
+			// Log and ignore errors during preference parsing to ensure
+			// the core user profile can still be loaded even if preferences are corrupt.
+			// Default/empty preferences will be used in such cases.
+			s.logger.Warn("Failed to parse user preferences", slog.String("user_id", uuid.UUID(user.ID.Bytes).String()), slog.Any("error", err))
 			preferences = make(map[string]interface{})
 		}
 	} else {
@@ -564,7 +567,10 @@ func (s *Service) createUserRowToProfile(user sqlc.CreateUserRow) *UserProfile {
 	var preferences map[string]interface{}
 	if user.Preferences != nil {
 		if err := json.Unmarshal(user.Preferences, &preferences); err != nil {
-			s.logger.Warn("Failed to parse user preferences", slog.Any("error", err))
+			// Log and ignore errors during preference parsing to ensure
+			// the core user profile can still be loaded even if preferences are corrupt.
+			// Default/empty preferences will be used in such cases.
+			s.logger.Warn("Failed to parse user preferences", slog.String("user_id", uuid.UUID(user.ID.Bytes).String()), slog.Any("error", err))
 			preferences = make(map[string]interface{})
 		}
 	} else {
@@ -600,7 +606,10 @@ func (s *Service) getUserByIDRowToProfile(user sqlc.GetUserByIDRow) *UserProfile
 	var preferences map[string]interface{}
 	if user.Preferences != nil {
 		if err := json.Unmarshal(user.Preferences, &preferences); err != nil {
-			s.logger.Warn("Failed to parse user preferences", slog.Any("error", err))
+			// Log and ignore errors during preference parsing to ensure
+			// the core user profile can still be loaded even if preferences are corrupt.
+			// Default/empty preferences will be used in such cases.
+			s.logger.Warn("Failed to parse user preferences", slog.String("user_id", uuid.UUID(user.ID.Bytes).String()), slog.Any("error", err))
 			preferences = make(map[string]interface{})
 		}
 	} else {
@@ -636,7 +645,10 @@ func (s *Service) updateUserProfileRowToProfile(user sqlc.UpdateUserProfileRow) 
 	var preferences map[string]interface{}
 	if user.Preferences != nil {
 		if err := json.Unmarshal(user.Preferences, &preferences); err != nil {
-			s.logger.Warn("Failed to parse user preferences", slog.Any("error", err))
+			// Log and ignore errors during preference parsing to ensure
+			// the core user profile can still be loaded even if preferences are corrupt.
+			// Default/empty preferences will be used in such cases.
+			s.logger.Warn("Failed to parse user preferences", slog.String("user_id", uuid.UUID(user.ID.Bytes).String()), slog.Any("error", err))
 			preferences = make(map[string]interface{})
 		}
 	} else {
@@ -672,7 +684,10 @@ func (s *Service) updateUserPreferencesRowToProfile(user sqlc.UpdateUserPreferen
 	var preferences map[string]interface{}
 	if user.Preferences != nil {
 		if err := json.Unmarshal(user.Preferences, &preferences); err != nil {
-			s.logger.Warn("Failed to parse user preferences", slog.Any("error", err))
+			// Log and ignore errors during preference parsing to ensure
+			// the core user profile can still be loaded even if preferences are corrupt.
+			// Default/empty preferences will be used in such cases.
+			s.logger.Warn("Failed to parse user preferences", slog.String("user_id", uuid.UUID(user.ID.Bytes).String()), slog.Any("error", err))
 			preferences = make(map[string]interface{})
 		}
 	} else {

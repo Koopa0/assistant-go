@@ -69,6 +69,8 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*AuthR
 		s.logger.Warn("Login attempt with invalid email",
 			slog.String("email", email),
 			slog.Any("error", err))
+		// Return a generic "invalid credentials" to avoid leaking information
+		// about whether the email exists or the password was wrong.
 		return nil, fmt.Errorf("invalid credentials")
 	}
 
@@ -76,6 +78,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*AuthR
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		s.logger.Warn("Login attempt with invalid password",
 			slog.String("email", email))
+		// Return a generic "invalid credentials" for security.
 		return nil, fmt.Errorf("invalid credentials")
 	}
 
@@ -92,12 +95,14 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (*AuthR
 	accessToken, err := s.tokenService.GenerateAccessToken(userID, user.Email, "user")
 	if err != nil {
 		s.logger.Error("Failed to generate access token via tokenService", slog.String("user_id", userID), slog.Any("error", err))
+		// Wrap error from tokenService to provide context of the calling operation.
 		return nil, fmt.Errorf("failed to generate access token: %w", err)
 	}
 
 	refreshToken, err := s.tokenService.GenerateRefreshToken(userID)
 	if err != nil {
 		s.logger.Error("Failed to generate refresh token via tokenService", slog.String("user_id", userID), slog.Any("error", err))
+		// Wrap error from tokenService to provide context of the calling operation.
 		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
 	}
 
@@ -170,6 +175,7 @@ func (s *AuthService) RefreshToken(ctx context.Context, refreshToken string) (st
 	accessToken, err := s.tokenService.GenerateAccessToken(claims.UserID, claims.Email, claims.Role)
 	if err != nil {
 		s.logger.Error("Failed to generate access token during refresh via tokenService", slog.String("user_id", claims.UserID), slog.Any("error", err))
+		// Wrap error from tokenService to provide context of the calling operation.
 		return "", fmt.Errorf("failed to generate access token: %w", err)
 	}
 
